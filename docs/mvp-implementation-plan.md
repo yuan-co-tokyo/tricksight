@@ -76,87 +76,153 @@ AIによる自動判定ではなく、ユーザーが事前にトリックを選
 
 ### 認証
 
-- Amazon Cognito
+- Better Auth
+- ユーザーデータは自分のPostgresに保持する
 
 ### 動画保存
 
-- Amazon S3
-- Presigned URLによるブラウザからの直接アップロード
+- Amazon S3（ソウル ap-northeast-2）
+- Presigned POSTによるブラウザからの直接アップロード
 
 ### AI分析
 
-- Amazon Bedrock
-- 動画対応のAmazon Novaモデル
+- Amazon Bedrock（ソウル ap-northeast-2）
+- 候補は動画対応のAmazon Nova系と、動画特化のTwelveLabs Pegasus 1.2
+- どちらもS3 URI方式で動画を渡すため、S3バケットは呼び出しリージョンと同一である必要がある
+- Phase 0で候補モデルの棚卸しと品質比較を行い確定する
+
+Pegasusは同期`InvokeModel`で呼び出せ、`responseFormat.jsonSchema`による構造化出力をネイティブに備える。第9章の`SkateAnalysisResult`をスキーマとして直接渡せるため、Novaのプロンプト依存のJSON生成より扱いやすい。
 
 ### バックエンド処理
 
 - Next.js Route Handler
-- AWS Lambda
+- 分析はRoute Handlerからのバックグラウンド実行とし、MVPではLambdaを使わない
+- 分析ロジックは独立モジュールに隔離し、将来Lambdaへ載せ替えられるようにする
 
 ### データベース
 
-- PostgreSQL
+- PostgreSQL（Supabase、東京 ap-northeast-1）
 - Drizzle ORM
+- Vercelの実行時接続はSupavisor Transaction pooler（ポート6543）を使い、`sslmode=require`を付ける
+- マイグレーションと`pg_dump`にはDirect connectionを使う。実行環境がIPv6へ接続できない場合のみSession pooler（ポート5432）を使う
+- 標準のPostgresドライバ（pg）を使い、ベンダー専用ドライバに依存しない
+- アプリ専用のDBロールを作り、デフォルトの`postgres`ロールをアプリから使わない
 
-MVPの開発速度を優先する場合は、NeonまたはSupabaseのPostgreSQLを利用する。
+接続文字列は用途ごとに分ける。
 
-AWSへの統一を優先する場合は、Aurora Serverless v2を利用する。
+```bash
+# VercelのRoute HandlerとBetter Authが使う
+DATABASE_URL=postgresql://...@aws-0-ap-northeast-1.pooler.supabase.com:6543/postgres?sslmode=require
+
+# Drizzleのマイグレーションとpg_dumpが使う
+DATABASE_ADMIN_URL=postgresql://...@db.<project-ref>.supabase.co:5432/postgres?sslmode=require
+```
+
+Transaction poolerではnamed prepared statementを使えないため、`pg`のクエリ設定に`name`を指定しない。Drizzleから発行するクエリも含め、実装時にTransaction modeで認証・CRUD・トランザクションの動作確認を行う。
+
+Supabaseは「東京にあるマネージドPostgres」としてのみ使う。Supabase AuthとSupabase Storageは使わない。認証はBetter Authでアプリ内に持ち、動画はS3へ置く。これによりDBは`pg_dump`だけでRDSへ移せる状態を保つ。
+
+Supabase Freeは1週間の無活動でプロジェクトが停止し、復帰にはStudioからの手動操作が必要になる。これを避けるため、GitHub Actionsのスケジュール実行で日次のkeep-aliveクエリを流す。Vercel Cronは使わない（移植性のため）。
+
+### DBの選定理由と見直し条件
+
+Supabaseを選んだ理由は東京リージョンがあることの一点である。製品としてはNeonの方が優れている点が多い。
+
+- Neonは無活動時も次の接続で自動復帰する（Supabaseは手動再開が必要）
+- Neonはブランチングを持ち、マイグレーション検証が容易
+- Neonの無料枠は10プロジェクト・合計5GB（Supabaseは組織あたり2プロジェクト・500MB）
+
+それでもSupabaseを採るのは、NeonのAPAC提供がシンガポールとシドニーに限られるため。シンガポールは日本からRTT約70msあり、セッション検証とデータ取得で1ページ2〜4往復すると毎リクエストに140〜280msが乗る。手動再開が年に数回発生するコストより、全リクエストに常時乗るコストの方が高いと判断した。
+
+次の条件が満たされた場合、Neonへの移行を検討する。
+
+- Neonが東京リージョンを提供した場合
+- Supabaseの2プロジェクト枠が不足した場合
+- keep-aliveの運用が破綻した場合
+
+移行コストを低く保つため、本節冒頭の制約（標準pgドライバ、Supabase AuthとStorageの不使用）を必ず守る。これらを守っている限り、移行は`pg_dump`と接続文字列の差し替えで完了する。
+
+### リージョン方針
+
+リージョンは用途で分割する。
+
+| 用途 | リージョン | 理由 |
+| --- | --- | --- |
+| Vercel関数 | 東京 `hnd1` | 体感速度。Hobbyプランは単一リージョンだが変更可能 |
+| Supabase | 東京 `ap-northeast-1` | Vercel関数と同居させDBアクセスを最短にする |
+| S3 | ソウル `ap-northeast-2` | Bedrockと同一リージョンにする必要がある |
+| Bedrock | ソウル `ap-northeast-2` | Pegasusの提供がAPACではソウルのみ |
+
+動画データはリージョンを跨がない。ブラウザはS3ソウルへ直接アップロードし、Bedrockは同一リージョン内でそれを読む。東京のVercel関数がソウルのBedrockを呼ぶ経路は動画本体を運ばないため、増える遅延は分析時間に対して無視できる。
 
 ### インフラ管理
 
-- AWS CDK
+- MVPではIaCを使わない
+- AWS側の構築対象はS3バケットとIAMのみとし、手動構築と手順書で管理する
+- 本番からのAWSアクセスはVercel OIDC federationによるAssumeRoleとし、静的アクセスキーを本番に置かない（OIDCはHobbyプランでも利用できる）
+- Preview環境にはAWSのロールARNとS3バケット名を設定せず、本番のS3およびBedrockへアクセスさせない
+- ローカル開発でのみIAMユーザーのアクセスキーを使う
+- AWSへ移行してLambda等が増えた時点でCDK導入を再検討する
 
 ### 監視
 
-- Amazon CloudWatch
+- アプリケーションはVercelのログを使う
+- BedrockとS3はCloudWatchを使う
 
 ### ホスティング
 
-第一候補：
+- Next.js：Vercel Hobby（東京 `hnd1`）
+- AI・動画処理：AWS（S3 + Bedrock、ソウル）
+- DB：Supabase Free（東京）
+- 認証：Better Auth（アプリ内）
 
-- Next.js：Vercel
-- AI・動画処理：AWS
-- DB：Neon
-- 認証：Cognito
+想定月額はS3の$0.3程度とBedrockの従量課金のみで、それ以外は$0となる。
 
-AWSに統一する場合：
+Vercel Hobbyは商用利用が禁止されている。MVPの検証段階は問題ないが、収益化する時点でPro（$20/席/月）への移行、またはAWSへの移行が必要になる。この分岐を判断ポイントとして認識しておく。
 
-- Next.js：AWS Amplify Hosting
-- AI・動画処理：AWS
-- DB：Aurora
-- 認証：Cognito
+### AWS移行性の維持
+
+MVP完成後にAWSへ移行する場合に備え、次のルールを守る。
+
+- Vercel専用サービス（Vercel KV、Blob、Cronなど）を使わない。ストレージはS3、DBはSupabaseのPostgresに限定する。
+- Supabase AuthとSupabase Storageを使わない。これらを使うとDBだけを移す形での移行ができなくなる。
+- DB接続は標準のPostgresドライバを使い、移行時の接続コード変更をなくす。
+- 分析処理はRoute Handlerに直書きせず独立モジュールに隔離し、Lambdaへ載せ替え可能に保つ。
+
+移行時に動かすのはNext.jsホスティングとPostgres（Supabase → RDS、pg_dump）だけとし、動画（S3）と分析（Bedrock）は初日からAWSに置く。
+
+Next.jsホスティングの移行先はコンテナ（App Runner等）またはOpenNext（Lambda + CloudFront）を想定する。AWS Amplify Hostingは2026年半ば時点で公式にNext.js 15までしか対応しておらず、本プロジェクトのNext.js 16では選択肢にならない。Next.js 16.2で安定版Adapter APIが出てAWSも策定に参加しているため、移行を検討する時点で対応状況を再確認する。
 
 ## 6. システム構成
 
 ```text
-ブラウザ
+ブラウザ（日本）
   │
-  ├─ Next.js Webアプリ
-  │    ├─ ログイン
+  ├─ Next.js Webアプリ（Vercel / 東京 hnd1）
+  │    ├─ ログイン（Better Auth）
   │    ├─ 動画登録
   │    ├─ 分析結果
   │    └─ 履歴表示
+  │         │
+  │         └─ PostgreSQL（Supabase / 東京）
+  │              └─ ユーザー・練習・動画・分析履歴
   │
-  ├─ Cognito
-  │    └─ ユーザー認証
-  │
-  ├─ PostgreSQL
-  │    └─ 練習・動画・分析履歴
-  │
-  └─ Presigned URL取得
-           │
-           ▼
-       Amazon S3
-           │
-           ▼
-         Lambda
-           │
-           ▼
-    Amazon Bedrock / Nova
-           │
-           ▼
-   分析結果をPostgreSQLへ保存
+  ├─ Presigned POST情報取得 ────┐
+  │                             │
+  └─ 動画を直接アップロード ──────┴─→ Amazon S3（ソウル）
+                                            │
+                                            │ 同一リージョン内で読み取り
+                                            ▼
+       Route Handlerのバックグラウンド処理 ─→ Amazon Bedrock（ソウル）
+       （Vercel / 東京）                        Nova または Pegasus
+                    │                              │
+                    └──────────────────────────────┘
+                                    │
+                                    ▼
+                    分析結果をPostgreSQL（東京）へ保存
 ```
+
+動画本体が越境しないことがこの構成の要点である。ブラウザからS3ソウルへ直接上げ、Bedrockはそれを同一リージョン内で読む。東京のVercel関数とソウルのBedrockの間を流れるのはAPI呼び出しとJSON結果だけになる。
 
 ## 7. 動画アップロード方式
 
@@ -165,10 +231,20 @@ AWSに統一する場合：
 処理の流れは以下とする。
 
 1. Next.js APIへアップロード要求
-2. APIがS3 Presigned URLを発行
+2. APIがオブジェクトキーを確定し、S3 Presigned POSTのURLとフォームフィールドを発行
 3. ブラウザからS3へ動画を直接アップロード
 4. アップロード完了をAPIへ通知
-5. 分析処理を開始
+5. APIが`HeadObject`でオブジェクトの存在、キー、サイズ、Content-Typeを再検証
+6. 検証に失敗したオブジェクトは削除し、成功した場合のみ分析処理を開始
+
+Presigned POSTのポリシーには次の条件を必ず含め、クライアント側の検証だけに依存しない。
+
+- オブジェクトキーの完全一致
+- `content-length-range`による上限100MB
+- 許可するContent-Typeの完全一致（`video/mp4`または`video/quicktime`）
+- 有効期限は5分以内
+
+Presigned POSTは有効期限内で再利用できるため、キーは推測困難なUUIDで発行する。分析開始前の`HeadObject`検証ではDBに保存したユーザーIDとオブジェクトキーの対応も確認し、別ユーザーのキーを指定できないようにする。
 
 ### 動画制限
 
@@ -178,6 +254,23 @@ AWSに統一する場合：
 - 1回の投稿につき動画1本
 - 縦動画・横動画の両方を許可
 - 音声は分析対象外
+
+### スローモーション撮影は必須要件とする
+
+Amazon Novaの動画理解は、16分以下の動画に対して**1秒あたり1フレーム**でサンプリングする。20秒の動画ならモデルが見るのは20枚である。
+
+キックフリップで板が回っている時間は約0.3秒しかない。通常撮影の動画では、この0.3秒に対してサンプリングされるフレームは0枚か1枚になる。つまり第9章で評価させようとしている「足の使い方」や「ポップ」は、通常撮影では原理的にモデルへ届かない。
+
+したがってスローモーション撮影は推奨ではなく、分析が成立するための前提条件として扱う。
+
+- 撮影画面とアップロード画面で、スローモーション撮影を明示的に要求する
+- iPhoneの240fpsスローモーションであれば8倍に引き伸ばされ、0.3秒のフリップが約2.4秒（2〜3フレーム相当）になる
+- 重要なのはファイルの再生時間であり、fpsではない。スロー再生された状態で書き出された動画を受け取る必要がある
+- 通常撮影の動画がアップロードされた場合に備え、分析結果の`detected.visibility`が`POOR`のときは撮影方法の再案内を表示する
+
+解像度とフレームレートを上げても分析精度は上がらない。Novaは全フレームを672×672へリサイズし、サンプリングは最大1FPSであるため、4K撮影も60fps撮影も精度には寄与せず、ファイルサイズ制限を圧迫するだけになる。
+
+この制約の度合いはモデルによって異なる。動画ネイティブのPegasusはフレームサンプリング前提のNovaと時間解像度の扱いが違うため、Phase 0での比較対象として重要度が高い。
 
 ## 8. 非同期分析
 
@@ -206,7 +299,7 @@ UPLOADED
       ↓
 QUEUED
       ↓
-Lambda起動
+バックグラウンド処理開始
       ↓
 ANALYZING
       ↓
@@ -220,6 +313,46 @@ COMPLETED
 画面側は数秒ごとにAPIを呼び出し、分析ステータスを確認する。
 
 MVPではWebSocketを利用しない。
+
+### 実行時間とスタック検出
+
+バックグラウンド処理は、未`await`のPromiseを残す実装にはしない。Next.jsの`after()`をRoute Handler内で呼び、レスポンス返却後もVercelが処理の完了を待つ形にする。
+
+```ts
+import { after } from "next/server";
+
+export const runtime = "nodejs";
+export const maxDuration = 300;
+
+export async function POST() {
+  // 所有者確認、アップロード検証、分析レコードのQUEUED化
+  const analysisId = await createQueuedAnalysis();
+
+  after(async () => {
+    await runQueuedAnalysis(analysisId);
+  });
+
+  return Response.json({ analysisId, status: "QUEUED" }, { status: 202 });
+}
+```
+
+Vercel Hobbyで300秒を使うにはFluid Computeが有効であることをデプロイ前に確認する。`after()`の処理も関数の最大実行時間に含まれる。20秒動画に対するBedrockの同期呼び出しが300秒以内に収まることをPhase 0で実測し、超える場合はLambda等のジョブ実行基盤へ切り替える。
+
+二重呼び出しによる重複課金を防ぐため、ワーカー開始時に`QUEUED`から`ANALYZING`への条件付きUPDATEを行う。更新件数が0件なら、別処理が取得済みとしてBedrockを呼ばず終了する。
+
+```sql
+UPDATE analyses
+SET status = 'ANALYZING', started_at = now(), attempt_count = attempt_count + 1
+WHERE id = $1 AND status = 'QUEUED';
+```
+
+再分析は既存行を`QUEUED`へ戻さず、新しい`analyses`行を作る。1つの動画につき`QUEUED`または`ANALYZING`の行を同時に1件だけ許可する部分ユニークインデックスを設ける。
+
+ただしVercelの関数にはリトライの仕組みがない。関数が異常終了すると`ANALYZING`のまま残る動画が発生する。これを回収するため、ステータス確認APIにスタック検出を持たせる。
+
+- `ANALYZING`のまま一定時間（例：10分）を超えたレコードは`FAILED`へ落とす
+- `FAILED`になったものは、回数上限の範囲でユーザーが再分析を実行できる
+- 併せて`started_at`を必ず記録し、経過時間を判定できるようにする
 
 ## 9. AI分析内容
 
@@ -236,7 +369,9 @@ AIには以下を評価させる。
 - 改善点
 - 次回の練習方法
 
-AIの出力は自由文だけでなく、JSON形式に固定する。
+AIの出力は自由文だけでなく、JSON形式に固定する。出力はzodでスキーマ検証し、検証ロジックにはユニットテストを用意する。
+
+構造化出力の実現方法はモデルによって異なる。Pegasusは`responseFormat.jsonSchema`でスキーマを直接受け取れるため、以下の型から生成したJSON Schemaを渡す。Novaはプロンプトでの指示に依存するため、パース失敗時のリトライを実装する。いずれの場合もzodによる検証は共通で通す。
 
 ```ts
 type SkateAnalysisResult = {
@@ -303,14 +438,18 @@ interface VideoAnalysisProvider {
 
 ```text
 VideoAnalysisProvider
-└─ BedrockNovaVideoAnalyzer
+├─ BedrockNovaVideoAnalyzer
+└─ BedrockPegasusVideoAnalyzer
 ```
+
+Phase 0で両方を実装し、比較結果の良かった方をMVPの既定とする。落選した側も削除せず、評価ハーネスから呼べる状態で残す。
 
 将来：
 
 ```text
 VideoAnalysisProvider
 ├─ BedrockNovaVideoAnalyzer
+├─ BedrockPegasusVideoAnalyzer
 ├─ GeminiVideoAnalyzer
 └─ MediaPipeEnhancedAnalyzer
 ```
@@ -344,9 +483,12 @@ prompts/
 
 ### users
 
+認証テーブルはBetter Authの標準スキーマ（user、session、account、verification）を使う。
+
+userテーブルへアプリ固有の列を追加する。
+
 ```text
 id
-cognito_sub
 display_name
 stance
 created_at
@@ -409,6 +551,7 @@ result_json
 raw_response
 error_code
 error_message
+attempt_count
 started_at
 completed_at
 created_at
@@ -536,10 +679,15 @@ Electric Cyanは以下に限定して使う。
 - S3キーに元ファイル名を直接使用しない
 - ファイルサイズを検証
 - MIMEタイプと拡張子を検証
-- Presigned URLの期限を短くする
+- アップロードには上限100MBを強制したPresigned POSTを使い、有効期限を5分以内にする
+- アップロード完了後、分析前に`HeadObject`でキー、サイズ、Content-Typeを再検証し、DBでキーと所有者の対応を確認する
 - ユーザーごとにS3パスを分離する
 - APIですべて所有者チェックを行う
-- LambdaのIAM権限を最小化する
+- AWSアクセスにはこのプロジェクト専用のIAMを作り、権限をBedrock呼び出しと対象S3バケットに最小化する
+- 本番環境はVercel OIDC federationでAssumeRoleし、静的なアクセスキーを置かない
+- 静的アクセスキーはローカル開発に限定する
+- DB接続文字列はアプリ専用ロールのものを使い、`postgres`ロールの認証情報をアプリへ渡さない
+- 分析実行に1ユーザーあたり1日の回数上限を設ける
 - AIの生レスポンスをブラウザへ直接返さない
 - 他ユーザーの動画や分析結果にアクセスできないようにする
 
@@ -551,6 +699,21 @@ private/{userId}/{sessionId}/{videoId}/original.mp4
 
 ## 16. 実装順序
 
+### Phase 0：分析品質検証
+
+- プロジェクト専用IAMとBedrockモデルアクセスの準備
+- ソウルリージョンで利用可能な動画対応モデルの棚卸し（`aws bedrock list-foundation-models`および`list-inference-profiles`で実機確認する）
+- リージョン整合（S3とBedrockがともにソウル）の確認
+- 検証用スケート動画の収集。同一トリックについて通常撮影版とスローモーション版の両方を用意する
+- トリック別プロンプトv1の作成
+- 候補モデルの比較（Nova系 / TwelveLabs Pegasus 1.2）
+- 評価ハーネス（`pnpm eval`）の実装
+- 第18章の確認項目による品質判定
+
+候補モデルは実機確認の結果で確定する。Nova 2およびNova Lite 1.5の存在と、それらのソウルでの提供状況を最初に確認する。Nova Lite 1.5は20分の動画まで1FPSのサンプリングを維持するとされており、旧Lite（16分で頭打ち）と挙動が異なる。
+
+Phase 0はPhase 1〜3と並行できるが、Phase 5の実装はPhase 0の品質判定を通過してから始める。
+
 ### Phase 1：基盤
 
 - Next.jsプロジェクト作成
@@ -558,13 +721,15 @@ private/{userId}/{sessionId}/{videoId}/original.mp4
 - Tailwind CSS
 - shadcn/ui
 - Electric Cyan × Gunmetalテーマ
-- PostgreSQL
+- PostgreSQL（Supabase、東京）
+- Vercel実行用のTransaction pooler接続と、管理用のDirect connectionを分離
+- Vercel関数リージョンを`hnd1`へ固定（`vercel.json`）
+- Supabase keep-alive用のGitHub Actionsワークフロー
 - Drizzle ORM
-- AWS CDK
 
 ### Phase 2：認証
 
-- Cognito User Pool
+- Better Auth導入
 - 新規登録
 - ログイン
 - ログアウト
@@ -582,22 +747,28 @@ private/{userId}/{sessionId}/{videoId}/original.mp4
 
 ### Phase 4：動画アップロード
 
-- S3バケット
-- Presigned URL
+- S3バケット（ソウル）とCORS設定
+- サイズ上限とContent-Typeを強制するPresigned POST
+- アップロード完了後の`HeadObject`再検証
 - 動画プレビュー
 - アップロード進捗
+- スローモーション撮影の案内表示
 - 期限付き再生URL
 - アクセス制御
 
 ### Phase 5：AI分析
 
-- Lambda
-- Bedrock Nova呼び出し
+- Route Handlerの`after()`からのバックグラウンド分析実行（Fluid Compute、`maxDuration = 300`）
+- `QUEUED`から`ANALYZING`への原子的な状態遷移と二重実行防止
+- Phase 0で選定したモデルの呼び出し
+- 本番はVercel OIDC、ローカルはアクセスキーで認証を切り替え
+- スタック検出（`ANALYZING`のまま滞留したレコードの`FAILED`化）
 - トリック別プロンプト
 - JSON Schema検証
 - 分析ステータス
 - エラーハンドリング
 - 再分析
+- 1ユーザーあたりの分析回数上限
 
 ### Phase 6：分析結果UI
 
@@ -614,8 +785,7 @@ private/{userId}/{sessionId}/{videoId}/original.mp4
 - サムネイル表示
 - ページネーション
 - モバイル表示調整
-- CloudWatchログ
-- エラー監視
+- ログとエラー監視の整備（Vercel / CloudWatch）
 - 動画削除
 
 ## 17. MVP完成条件
@@ -635,9 +805,11 @@ private/{userId}/{sessionId}/{videoId}/original.mp4
 - 分析失敗時に再実行できる
 - 他ユーザーのデータへアクセスできない
 
-## 18. 実装前に行う分析品質検証
+## 18. 実装前に行う分析品質検証（Phase 0）
 
 画面開発より先に、実際のスケート動画を10本程度用意し、Bedrockの分析品質を確認する。
+
+検証スクリプトは使い捨てにせず、`pnpm eval`として再実行できる評価ハーネスにする。プロンプトやモデルを変更するたびに、同じ動画セットで回帰確認を行う。
 
 確認項目：
 
@@ -648,15 +820,21 @@ private/{userId}/{sessionId}/{videoId}/original.mp4
 5. 同じ動画に対して評価が大きくぶれないか
 6. 次回の練習内容が実行可能か
 7. 撮影角度による精度差がどの程度あるか
+8. 通常撮影とスローモーション撮影で精度がどれだけ変わるか
+9. NovaとPegasusで、足元の細かい動きの捉え方にどれだけ差が出るか
+
+8と9はこのプロダクトの成立性そのものを左右するため、最優先で確認する。第7章のとおりNovaのサンプリングは1FPSであり、通常撮影ではトリックの核心部分がモデルに届かない可能性が高い。ここで「スローでなければ使い物にならない」ことが確認できれば、アップロード画面でスロー撮影をどの程度強く要求するかが決まる。
 
 品質が不足する場合は、以下の順番で改善する。
 
-1. プロンプトを改善する
-2. 撮影方法をユーザーに案内する
-3. トリック別プロンプトを細分化する
-4. 動画から代表フレームを抽出する
-5. Geminiと比較検証する
-6. MediaPipeによる骨格情報を追加する
+1. スローモーション撮影の要求を強める
+2. NovaとPegasusのうち、時間解像度に強い方へ寄せる
+3. プロンプトを改善する
+4. 撮影角度と距離の指示を具体化する
+5. トリック別プロンプトを細分化する
+6. 動画から代表フレームを抽出する
+7. Geminiと比較検証する
+8. MediaPipeによる骨格情報を追加する
 
 ## 19. MVPで最も重視すること
 
