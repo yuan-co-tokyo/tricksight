@@ -47,6 +47,11 @@ export type ResolvedTrickPrompt = {
   prompt: string;
 };
 
+export type VideoPromptContext = {
+  stance: string;
+  cameraAngle: string;
+};
+
 type PromptComponent = {
   version: string;
   prompt: string;
@@ -82,4 +87,11 @@ export function getPromptForTrick(trickSlug: string): ResolvedTrickPrompt {
   const resolved = resolveTrickPrompt(trickSlug);
 
   return composePrompt({ version, prompt }, resolved);
+}
+
+export function appendVideoContext(
+  basePrompt: string,
+  context: VideoPromptContext,
+): string {
+  return `${basePrompt}\n\n分析対象情報:\n- スタンス: ${context.stance}\n- 撮影方向: ${context.cameraAngle}`;
 }

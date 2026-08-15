@@ -1,5 +1,33 @@
 import { z } from "zod";
 
+export type ProviderJsonSchemaOptions = {
+  strip: readonly string[];
+};
+
+export function toProviderJsonSchema<T>(
+  schema: T,
+  options: ProviderJsonSchemaOptions,
+): T {
+  const strippedKeywords = new Set(options.strip);
+
+  function transform(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map(transform);
+    }
+    if (typeof value !== "object" || value === null) {
+      return value;
+    }
+
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => !strippedKeywords.has(key))
+        .map(([key, child]) => [key, transform(child)]),
+    );
+  }
+
+  return transform(schema) as T;
+}
+
 const scoreSchema = z.number().int().min(0).max(100);
 
 export const skateAnalysisResultSchema = z.strictObject({

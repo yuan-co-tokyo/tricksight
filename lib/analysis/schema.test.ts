@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   skateAnalysisResultJsonSchema,
   skateAnalysisResultSchema,
+  toProviderJsonSchema,
 } from "./schema";
 
 const resultWithoutOptionalFields = {
@@ -145,5 +146,78 @@ describe("skateAnalysisResultSchema", () => {
       "properties.scores.required",
       ["setup", "pop", "bodyBalance", "footControl", "landing"],
     );
+  });
+});
+
+describe("toProviderJsonSchema", () => {
+  it("指定keywordをネストしたobjectとarray itemsから再帰的に除去する", () => {
+    const source = {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      type: "object",
+      required: ["score", "improvements"],
+      properties: {
+        score: { type: "integer", minimum: 0, maximum: 100 },
+        improvements: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["priority"],
+            properties: {
+              priority: {
+                type: "integer",
+                enum: [1, 2, 3],
+                exclusiveMinimum: 0,
+                exclusiveMaximum: 4,
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const transformed = toProviderJsonSchema(source, {
+      strip: [
+        "$schema",
+        "minimum",
+        "maximum",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+      ],
+    });
+
+    expect(transformed).not.toHaveProperty("$schema");
+    expect(transformed).not.toHaveProperty("properties.score.minimum");
+    expect(transformed).not.toHaveProperty("properties.score.maximum");
+    expect(transformed).not.toHaveProperty(
+      "properties.improvements.items.properties.priority.exclusiveMinimum",
+    );
+    expect(transformed).not.toHaveProperty(
+      "properties.improvements.items.properties.priority.exclusiveMaximum",
+    );
+    expect(source).toHaveProperty("properties.score.minimum", 0);
+  });
+
+  it("除去後もrequiredとenumを保持する", () => {
+    const transformed = toProviderJsonSchema(
+      skateAnalysisResultJsonSchema,
+      {
+        strip: ["minimum", "maximum"],
+      },
+    );
+
+    expect(transformed).toHaveProperty(
+      "required",
+      expect.arrayContaining(["scores", "result"]),
+    );
+    expect(transformed).toHaveProperty("properties.detected.properties.visibility.enum", [
+      "GOOD",
+      "PARTIAL",
+      "POOR",
+    ]);
+    expect(transformed).toHaveProperty("properties.result.properties.outcome.enum", [
+      "LANDED",
+      "BAILED",
+      "UNCLEAR",
+    ]);
   });
 });
