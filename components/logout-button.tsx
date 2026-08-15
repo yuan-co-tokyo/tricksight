@@ -39,17 +39,22 @@ export function LogoutButton() {
   }
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className="flex shrink-0 flex-col items-end gap-1">
       <Button
         type="button"
         variant="outline"
+        size="sm"
         onClick={handleLogout}
         disabled={isSubmitting}
       >
-        {isSubmitting ? "ログアウトしています…" : "ログアウト"}
+        {isSubmitting ? "処理中…" : "ログアウト"}
       </Button>
       {errorMessage ? (
-        <p role="alert" aria-live="polite" className="text-sm text-destructive">
+        <p
+          role="alert"
+          aria-live="polite"
+          className="max-w-64 text-right text-xs text-destructive sm:text-sm"
+        >
           {errorMessage}
         </p>
       ) : null}
