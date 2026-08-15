@@ -1,0 +1,22 @@
+{
+  "samples": [
+    {
+      "id": "ollie-slow-landed-001",
+      "file": "eval/input/ollie-slow-landed-001.mp4",
+      "trick": "OLLIE",
+      "stance": "REGULAR",
+      "cameraAngle": "SIDE",
+      "expectedOutcome": "LANDED",
+      "notes": "横から撮影したスローモーション動画。着地が成功している。"
+    },
+    {
+      "id": "ollie-normal-bailed-001",
+      "file": "eval/input/ollie-normal-bailed-001.mp4",
+      "trick": "OLLIE",
+      "stance": "GOOFY",
+      "cameraAngle": "DIAGONAL",
+      "expectedOutcome": "BAILED",
+      "notes": "通常速度の動画。足元が見切れないように撮影する。"
+    }
+  ]
+}
