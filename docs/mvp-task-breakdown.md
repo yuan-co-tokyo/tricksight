@@ -39,11 +39,51 @@ Supabase の `postgres` ロールは **superuser ではない**（`rolsuper=fals
 
 `pnpm db:verify` は6項目すべて成功する。
 
+- T0-7 意味のある単位で9コミットに分割し `main` へ push
+- keep-alive の有効化（ワークフローをpush、Secret設定、手動実行で疎通確認）
+
+### keep-alive の構成
+
+- Secret `SUPABASE_DATABASE_URL` は **`tricksight_app` の東京Transaction pooler接続文字列**。`uselibpqcompat` は付けない（psql=libpqは解釈しないため。libpqでは `sslmode=require` が元々「暗号化するが検証しない」意味なのでそのままで正しい）
+- Direct connectionはIPv6専用でGitHub Actionsランナーから到達できないため、poolerを使う
+- 2026-08-15 に `workflow_dispatch` で手動実行し、`select 1;` が `(1 row)` を返して成功することを確認済み
+
+### TwelveLabs の JSON Schema 制約（実測）
+
+TwelveLabs の `responseFormat.jsonSchema` は **numeric constraints を受け付けない**。`minimum` を含めると、動画処理の前に400で拒否される。
+
+```
+Status code: 400
+{ "code": "response_format_invalid",
+  "message": "...invalid response format: numeric constraints ('minimum') are not supported" }
+```
+
+対応：zodスキーマ側の `minimum` / `maximum` は**維持したまま**、APIへ渡すJSON Schemaからのみ除去する。`lib/analysis/schema.ts` の `toProviderJsonSchema(schema, { strip })` が再帰的に除去し、除去対象はプロバイダ側（`twelvelabs-direct.ts`）が指定する。除去したのは `$schema` / `minimum` / `maximum` / `exclusiveMinimum` / `exclusiveMaximum` で、`additionalProperties: false` は受け付けられたため残している。
+
+400はビデオ処理前に返るため課金は発生しない。切り分けは無料で回せる。
+
+### 分析品質の所見（要注意）
+
+T1-6 の実測（kickflip-001、スロー撮影なし・正面）:
+
+| 項目 | 値 |
+| --- | --- |
+| scores | setup 85 / pop 80 / bodyBalance 85 / footControl 80 / landing 90 |
+| detected | trickMatchesSelection=true, visibility=**GOOD** |
+| result | outcome=**LANDED**, confidence=**0.9** |
+| 人間の期待値 | outcome=**BAILED** |
+
+**失敗した試技を、確信度0.9で成功と判定している。** 2026-08-12 の旧評価でも kickflip-002（期待BAILED）を LANDED と判定しており、2件2件とも成功・失敗の判定を誤っている。
+
+これは計画書§18の確認項目2「成功と失敗をおおむね判定できるか」が現時点で通っていないことを意味する。outcome が誤っていれば scores も意味を持たない。
+
+依頼者の判断により品質ゲートは後回しとしT6まで作るが、**この所見はプロダクトの成立性に直結する**ため、H-1（スロー撮影を含む評価動画10本）の収集後に最優先で再評価すること。改善は計画書§18の順序（1.スロー撮影の要求を強める → 2.モデル選択 → 3.プロンプト改善）で行う。
+
 ### 未解決の課題
 
 | 課題 | 内容 |
 | --- | --- |
-| GitHub Secret | keep-alive用 `SUPABASE_DATABASE_URL` が旧ムンバイのままの可能性。東京の接続文字列へ更新が必要（psql用なので `uselibpqcompat` は付けない） |
+| 分析品質 | 成功・失敗の判定が2件中2件で誤り（上記）。H-1後に最優先で再評価 |
 | 評価動画 | H-1 未着手。現在2本（ともにKICKFLIP・スロー版なし） |
 
 ## 前提
