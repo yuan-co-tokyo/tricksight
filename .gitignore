@@ -29,9 +29,17 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+/.pnpm-store/
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# Phase 0 evaluation inputs and generated model outputs
+/eval/input/
+/eval/output/
+/eval/manifest.json
+/eval/twelvelabs-assets.json
 
 # vercel
 .vercel
