@@ -69,7 +69,9 @@ pnpm eval:twelvelabs -- --sample ollie-001
 pnpm eval:twelvelabs -- --all
 ```
 
-Pegasus 1.5ではIndexを作らず、動画をAssetとして直接アップロードして同期分析する。同一内容の動画は`eval/twelvelabs-assets.json`に保存したAsset IDを再利用する。このキャッシュ、入力動画、分析結果はGit管理しない。
+Pegasus 1.5では、本番と同じ`TwelveLabsDirectVideoAnalyzer`を使って同期分析する。ローカル動画は最初に`S3_BUCKET_NAME/eval/`へアップロードされ、presigned GET URL経由でTwelveLabsのAssetになる。S3オブジェクトのキーには動画内容のSHA-256を使い、同じ内容が既にS3にあれば再アップロードしない。TwelveLabsのAsset IDはキャッシュせず、評価ごとに新しいAssetを作成する。
+
+評価結果には`sample`、`durationMs`、`analysis`に加えて、`provider`、`modelId`、共通プロンプトとトリック別プロンプトを組み合わせた`promptVersion`を保存する。失敗時は`error_code`と`error`を確認する。入力動画と分析結果はGit管理しない。
 
 ## 評価時の確認項目
 
@@ -78,3 +80,4 @@ Pegasus 1.5ではIndexを作らず、動画をAssetとして直接アップロ�
 - 改善点が映像の観測内容に基づき、次回の練習で使えるか
 - スローモーション動画で足元・ポップへの言及が改善するか
 - 同じ入力で構造化JSONが安定して返るか
+- `scores`の5項目（setup、pop、bodyBalance、footControl、landing）が0〜100の整数で返るか

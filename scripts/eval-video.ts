@@ -8,6 +8,17 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
 import { z } from "zod";
 
+import {
+  skateAnalysisResultJsonSchema,
+  skateAnalysisResultSchema,
+  type SkateAnalysisResult,
+} from "../lib/analysis/schema";
+import {
+  appendVideoContext,
+  getPromptForTrick,
+  type SupportedTrickSlug,
+} from "../prompts/common-system-v1";
+
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 // Nova 2 Lite is invoked through a Bedrock inference profile.  The bare
 // foundation-model ID does not support on-demand throughput.
@@ -32,46 +43,15 @@ const manifestSchema = z.object({
   samples: z.array(sampleSchema).min(1),
 });
 
-const analysisSchema = z.object({
-  summary: z.string(),
-  detected: z.object({
-    trickMatchesSelection: z.boolean(),
-    visibility: z.enum(["GOOD", "PARTIAL", "POOR"]),
-  }),
-  result: z.object({
-    outcome: outcomeSchema,
-    confidence: z.number().min(0).max(1),
-  }),
-  strengths: z.array(
-    z.object({
-      title: z.string(),
-      description: z.string(),
-    }),
-  ).max(3),
-  improvements: z.array(
-    z.object({
-      title: z.string(),
-      description: z.string(),
-      priority: z.union([z.literal(1), z.literal(2), z.literal(3)]),
-      timestampSeconds: z.number().nonnegative().optional(),
-    }),
-  ).max(3),
-  nextPractice: z.object({
-    focus: z.string(),
-    drill: z.string(),
-  }),
-});
-
 type Provider = z.infer<typeof providerSchema>;
 type Sample = z.infer<typeof sampleSchema>;
-type Analysis = z.infer<typeof analysisSchema>;
 
 type ProviderResult = {
   provider: "nova" | "pegasus";
   modelId: string;
   durationMs: number;
   rawText: string | null;
-  analysis: Analysis | null;
+  analysis: SkateAnalysisResult | null;
   parseError: string | null;
   error: string | null;
 };
@@ -81,77 +61,6 @@ type EvaluationResult = {
   s3Uri: string;
   results: ProviderResult[];
 };
-
-const analysisJsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    summary: { type: "string" },
-    detected: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        trickMatchesSelection: { type: "boolean" },
-        visibility: { type: "string", enum: ["GOOD", "PARTIAL", "POOR"] },
-      },
-      required: ["trickMatchesSelection", "visibility"],
-    },
-    result: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        outcome: { type: "string", enum: ["LANDED", "BAILED", "UNCLEAR"] },
-        confidence: { type: "number", minimum: 0, maximum: 1 },
-      },
-      required: ["outcome", "confidence"],
-    },
-    strengths: {
-      type: "array",
-      maxItems: 3,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          title: { type: "string" },
-          description: { type: "string" },
-        },
-        required: ["title", "description"],
-      },
-    },
-    improvements: {
-      type: "array",
-      maxItems: 3,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          title: { type: "string" },
-          description: { type: "string" },
-          priority: { type: "integer", enum: [1, 2, 3] },
-          timestampSeconds: { type: "number", minimum: 0 },
-        },
-        required: ["title", "description", "priority"],
-      },
-    },
-    nextPractice: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        focus: { type: "string" },
-        drill: { type: "string" },
-      },
-      required: ["focus", "drill"],
-    },
-  },
-  required: [
-    "summary",
-    "detected",
-    "result",
-    "strengths",
-    "improvements",
-    "nextPractice",
-  ],
-} as const;
 
 function requiredEnvironment(name: string) {
   const value = process.env[name];
@@ -209,14 +118,32 @@ function videoDetails(filePath: string) {
   };
 }
 
-function buildPrompt(sample: Sample) {
-  return `あなたはスケートボードの映像コーチです。映像だけから観察できることだけを回答してください。\n\n対象トリック: ${sample.trick}\nスタンス: ${sample.stance}\n撮影方向: ${sample.cameraAngle}\n撮影者メモ: ${sample.notes ?? "なし"}\n\n見えない、または確信できない動きは推測せず、visibilityをPARTIALまたはPOORにしてください。改善点は最大3件に絞り、次回の練習で実行できる具体的なドリルを1つ提案してください。出力は指定されたJSON Schemaに完全に従ってください。`;
+function trickSlug(trick: Sample["trick"]): SupportedTrickSlug {
+  switch (trick) {
+    case "OLLIE":
+      return "ollie";
+    case "POP_SHOVE_IT":
+      return "pop-shove-it";
+    case "KICKFLIP":
+      return "kickflip";
+  }
+}
+
+function promptForSample(sample: Sample) {
+  const resolved = getPromptForTrick(trickSlug(sample.trick));
+  return {
+    ...resolved,
+    prompt: appendVideoContext(resolved.prompt, {
+      stance: sample.stance,
+      cameraAngle: sample.cameraAngle,
+    }),
+  };
 }
 
 function parseAnalysis(rawText: string) {
   try {
     const parsedJson: unknown = JSON.parse(rawText);
-    const parsedAnalysis = analysisSchema.safeParse(parsedJson);
+    const parsedAnalysis = skateAnalysisResultSchema.safeParse(parsedJson);
 
     if (!parsedAnalysis.success) {
       return {
@@ -287,7 +214,7 @@ async function analyzeWithNova(input: {
           ],
         },
       ],
-      inferenceConfig: { maxTokens: 1_200, temperature: 0 },
+      inferenceConfig: { maxTokens: 2_000, temperature: 0 },
     }),
   );
   const durationMs = Math.round(performance.now() - startedAt);
@@ -328,9 +255,9 @@ async function analyzeWithPegasus(input: {
       body: JSON.stringify({
         inputPrompt: input.prompt,
         mediaSource: { s3Location: { uri: input.s3Uri } },
-        maxOutputTokens: 1_200,
+        maxOutputTokens: 2_000,
         temperature: 0,
-        responseFormat: { jsonSchema: analysisJsonSchema },
+        responseFormat: { jsonSchema: skateAnalysisResultJsonSchema },
       }),
     }),
   );
@@ -381,7 +308,7 @@ async function runProvider(input: {
   s3Uri: string;
   format: z.infer<typeof videoFormatSchema>;
 }) {
-  const prompt = buildPrompt(input.sample);
+  const { prompt } = promptForSample(input.sample);
 
   if (input.provider === "nova") {
     return analyzeWithNova({
