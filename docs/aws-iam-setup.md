@@ -15,6 +15,8 @@ Phase 0の分析品質検証と、以後のMVP開発で使うAWS側の権限を�
 
 S3とBedrockは必ず同一リージョンに置く。NovaもPegasusも、S3 URIで動画を渡す場合はバケットが呼び出しリージョンと同一である必要がある。ソウルを選ぶ理由は、TwelveLabs PegasusのAPAC提供がソウルのみであるため。
 
+Nova 2 Liteをソウルから呼び出すには、基盤モデルIDではなく`global.amazon.nova-2-lite-v1:0`というシステム定義の推論プロファイルを`modelId`に指定する。このプロファイルはグローバルなクロスリージョン推論であり、処理先がソウル以外になる可能性がある。動画データの処理場所を国内に限定する要件がある場合、Novaの評価は東京から`jp.amazon.nova-2-lite-v1:0`を使って別途実施する。
+
 認証情報の持ち方は環境で分ける。
 
 - **本番（Vercel）**：Vercel OIDC federationでIAMロールをAssumeRoleする。静的キーを置かない。
@@ -177,6 +179,8 @@ AWS_SECRET_ACCESS_KEY=...
 AWS_REGION=ap-northeast-2
 S3_BUCKET_NAME=tricksight-videos-<suffix>
 ```
+
+一時認証情報（アクセスキーIDが`ASIA`で始まるもの）を使う場合は、有効期限までの`AWS_SESSION_TOKEN`も必要になる。ただしPhase 0では、期限切れによる中断を避けるため、前節で作成した`tricksight-dev`のアクセスキー（`AKIA`で始まるもの）を使うことを推奨する。
 
 ## 4. S3バケットを作る
 

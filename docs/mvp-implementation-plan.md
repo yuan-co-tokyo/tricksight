@@ -103,7 +103,7 @@ Pegasusは同期`InvokeModel`で呼び出せ、`responseFormat.jsonSchema`によ
 
 - PostgreSQL（Supabase、東京 ap-northeast-1）
 - Drizzle ORM
-- Vercelの実行時接続はSupavisor Transaction pooler（ポート6543）を使い、`sslmode=require`を付ける
+- Vercelの実行時接続はSupavisor Transaction pooler（ポート6543）を使い、`uselibpqcompat=true&sslmode=require`を付ける
 - マイグレーションと`pg_dump`にはDirect connectionを使う。実行環境がIPv6へ接続できない場合のみSession pooler（ポート5432）を使う
 - 標準のPostgresドライバ（pg）を使い、ベンダー専用ドライバに依存しない
 - アプリ専用のDBロールを作り、デフォルトの`postgres`ロールをアプリから使わない
@@ -112,10 +112,10 @@ Pegasusは同期`InvokeModel`で呼び出せ、`responseFormat.jsonSchema`によ
 
 ```bash
 # VercelのRoute HandlerとBetter Authが使う
-DATABASE_URL=postgresql://...@aws-0-ap-northeast-1.pooler.supabase.com:6543/postgres?sslmode=require
+DATABASE_URL=postgresql://...@aws-0-ap-northeast-1.pooler.supabase.com:6543/postgres?uselibpqcompat=true&sslmode=require
 
 # Drizzleのマイグレーションとpg_dumpが使う
-DATABASE_ADMIN_URL=postgresql://...@db.<project-ref>.supabase.co:5432/postgres?sslmode=require
+DATABASE_ADMIN_URL=postgresql://...@db.<project-ref>.supabase.co:5432/postgres?uselibpqcompat=true&sslmode=require
 ```
 
 Transaction poolerではnamed prepared statementを使えないため、`pg`のクエリ設定に`name`を指定しない。Drizzleから発行するクエリも含め、実装時にTransaction modeで認証・CRUD・トランザクションの動作確認を行う。
