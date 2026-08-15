@@ -14,6 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { authClient } from "@/lib/auth-client";
+import { cn } from "@/lib/utils";
 
 type Stance = "REGULAR" | "GOOFY";
 
@@ -160,8 +161,11 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
                     <Button
                       key={option.value}
                       type="button"
-                      variant={selected ? "default" : "outline"}
-                      className="h-auto justify-start py-3 text-left"
+                      variant="outline"
+                      className={cn(
+                        "h-auto justify-start py-3 text-left",
+                        selected && "border-foreground/50 bg-muted",
+                      )}
                       aria-pressed={selected}
                       onClick={() => handleStanceChange(option.value)}
                     >
