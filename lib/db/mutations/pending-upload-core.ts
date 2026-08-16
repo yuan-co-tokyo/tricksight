@@ -6,18 +6,20 @@ import {
   type practiceSessions,
   type videos,
 } from "../schema";
+import {
+  MAX_VIDEO_FILE_SIZE,
+  allowedVideoContentTypes,
+  type AllowedVideoContentType,
+} from "../../uploads/video-constraints";
 
-export const MAX_VIDEO_FILE_SIZE = 100 * 1024 * 1024;
-
-export const allowedVideoContentTypes = [
-  "video/mp4",
-  "video/quicktime",
-] as const;
+export {
+  MAX_VIDEO_FILE_SIZE,
+  allowedVideoContentTypes,
+  type AllowedVideoContentType,
+} from "../../uploads/video-constraints";
 
 export type CameraAngle = (typeof cameraAngleEnum.enumValues)[number];
 export type UserOutcome = (typeof userOutcomeEnum.enumValues)[number];
-export type AllowedVideoContentType =
-  (typeof allowedVideoContentTypes)[number];
 
 type PracticeSessionInsert = typeof practiceSessions.$inferInsert;
 type VideoInsert = typeof videos.$inferInsert;

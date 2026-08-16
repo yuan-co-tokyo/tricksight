@@ -79,22 +79,15 @@ const practiceDateFormatter = new Intl.DateTimeFormat("ja-JP", {
 
 function AnalyzeVideoButton() {
   return (
-    <>
-      {/* TODO(T5): 動画登録画面の実装後、登録ルートへ遷移するLinkに置き換える。 */}
-      <Button
-        type="button"
-        size="lg"
-        disabled
-        title="動画登録画面は準備中です"
-        className="w-full sm:w-auto"
-      >
-        <PlusIcon aria-hidden="true" />
-        新しい動画を分析する
-        <span className="rounded-full bg-primary-foreground/15 px-1.5 py-0.5 text-[10px]">
-          準備中
-        </span>
-      </Button>
-    </>
+    <Button
+      size="lg"
+      className="w-full sm:w-auto"
+      nativeButton={false}
+      render={<Link href="/videos/new" />}
+    >
+      <PlusIcon aria-hidden="true" />
+      新しい動画を分析する
+    </Button>
   );
 }
 
@@ -413,12 +406,10 @@ function EmptyDashboard() {
               まだ練習動画がありません
             </h2>
             <p className="text-sm leading-6 text-muted-foreground">
-              まずは横から全身とボードが映るスローモーション動画を用意してください。動画登録機能が公開されると、ここからAI分析を始められます。
+              まずは横から全身とボードが映るスローモーション動画を用意してください。3〜20秒のMP4またはMOVから、AI分析の準備を始められます。
             </p>
           </div>
-          <div className="rounded-lg border border-dashed border-border bg-muted/30 p-3 text-xs leading-5 text-muted-foreground">
-            動画登録は準備中です。公開後は分析結果、改善ポイント、練習履歴がこの画面にまとまります。
-          </div>
+          <AnalyzeVideoButton />
         </div>
       </CardContent>
     </Card>

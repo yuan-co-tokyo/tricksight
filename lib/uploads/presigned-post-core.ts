@@ -7,7 +7,7 @@ import type {
 import {
   MAX_VIDEO_FILE_SIZE,
   type AllowedVideoContentType,
-} from "../db/mutations/pending-upload-core";
+} from "./video-constraints";
 
 export const PRESIGNED_POST_EXPIRES_IN_SECONDS = 5 * 60;
 

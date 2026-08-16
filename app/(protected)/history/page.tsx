@@ -124,13 +124,12 @@ function EmptyHistory({ filtered }: { filtered: boolean }) {
                 すべての履歴を見る
               </Link>
             ) : null}
-            <span
-              aria-disabled="true"
-              title="動画登録画面は準備中です"
-              className="inline-flex h-9 cursor-not-allowed items-center justify-center rounded-lg border border-border bg-muted px-3 text-sm font-medium text-muted-foreground opacity-70"
+            <Link
+              href="/videos/new"
+              className="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-[#33ebff] focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
             >
-              動画登録は準備中
-            </span>
+              新しい動画を分析する
+            </Link>
           </div>
         </div>
       </CardContent>
