@@ -13,6 +13,7 @@
     "db:generate": "node --env-file=.env.local node_modules/drizzle-kit/bin.cjs generate",
     "db:migrate": "node --env-file=.env.local node_modules/drizzle-kit/bin.cjs migrate",
     "db:seed": "node --env-file=.env.local --import tsx scripts/seed-database.ts",
+    "db:seed-dev": "node --env-file=.env.local --import tsx scripts/seed-dev-data.ts",
     "db:check": "node --env-file=.env.local node_modules/drizzle-kit/bin.cjs check",
     "db:verify": "node --env-file=.env.local --import tsx scripts/verify-database.ts",
     "auth:schema": "node --env-file=.env.local node_modules/auth/dist/index.mjs generate --config ./lib/auth.ts --output ./lib/db/schema/auth.ts --yes",
