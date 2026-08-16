@@ -27,7 +27,7 @@ const navigationItems = [
     href: "/history",
     label: "履歴",
     icon: HistoryIcon,
-    available: false,
+    available: true,
   },
   {
     href: "/profile",
