@@ -48,6 +48,19 @@ Supabase の `postgres` ロールは **superuser ではない**（`rolsuper=fals
 - Direct connectionはIPv6専用でGitHub Actionsランナーから到達できないため、poolerを使う
 - 2026-08-15 に `workflow_dispatch` で手動実行し、`select 1;` が `(1 row)` を返して成功することを確認済み
 
+### Vercel maxDuration の実測（2026-08-16）
+
+Vercel Hobby + Fluid Compute の本番環境で、Route Handler に指定した `maxDuration = 300` が実効であることを確認した。計測時の稼働リージョンは、レスポンスの `x-vercel-id` により `hnd1` であることを確認済み。
+
+| 要求秒数 | 結果 |
+| --- | --- |
+| 1秒 | 200 / elapsed 1.0秒 |
+| 30秒 | 200 / elapsed 30.0秒 |
+| 120秒 | 200 / elapsed 120.0秒 |
+| 280秒 | 200 / elapsed 280.0秒 |
+
+この実測により、計画書§8の Route Handler `after()` 方式で T6 のバックグラウンド分析を進める判断が確定した。Lambda など別のジョブ実行基盤への切り替えは不要とする。また、Vercel 関数から Supabase の東京 Transaction pooler への疎通も本番環境で実証済み。
+
 ### TwelveLabs の JSON Schema 制約（実測）
 
 TwelveLabs の `responseFormat.jsonSchema` は **numeric constraints を受け付けない**。`minimum` を含めると、動画処理の前に400で拒否される。
