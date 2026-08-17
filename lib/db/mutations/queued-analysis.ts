@@ -10,6 +10,7 @@ import {
   analyses,
   practiceSessions,
   tricks,
+  user,
   videos,
 } from "@/lib/db/schema";
 import { getPromptForTrick } from "@/prompts/common-system-v1";
@@ -31,6 +32,7 @@ const queuedAnalysisStore: QueuedAnalysisStore = {
               id: videos.id,
               status: videos.status,
               trickSlug: tricks.slug,
+              stance: user.stance,
             })
             .from(videos)
             .innerJoin(
@@ -38,6 +40,7 @@ const queuedAnalysisStore: QueuedAnalysisStore = {
               eq(practiceSessions.id, videos.sessionId),
             )
             .innerJoin(tricks, eq(tricks.id, practiceSessions.trickId))
+            .innerJoin(user, eq(user.id, practiceSessions.userId))
             .where(
               and(
                 eq(videos.id, input.videoId),

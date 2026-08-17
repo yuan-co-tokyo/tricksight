@@ -15,6 +15,7 @@ export type OwnedVideoForQueuedAnalysis = {
   id: string;
   status: VideoStatus;
   trickSlug: string;
+  stance: "REGULAR" | "GOOFY" | null;
 };
 
 export type QueuedAnalysisInsert = Pick<
@@ -60,6 +61,7 @@ export type QueuedAnalysisCreationErrorCode =
   | "UNAUTHENTICATED"
   | "VIDEO_NOT_FOUND"
   | "VIDEO_NOT_READY"
+  | "STANCE_REQUIRED"
   | "PROMPT_UNAVAILABLE"
   | "CONCURRENT_STATE_CHANGED";
 
@@ -135,6 +137,13 @@ export function createQueuedAnalysisCreator(
         throw new QueuedAnalysisCreationError(
           "VIDEO_NOT_READY",
           "The selected video is not ready for analysis.",
+        );
+      }
+
+      if (video.stance === null) {
+        throw new QueuedAnalysisCreationError(
+          "STANCE_REQUIRED",
+          "Set a stance in the profile before requesting analysis.",
         );
       }
 

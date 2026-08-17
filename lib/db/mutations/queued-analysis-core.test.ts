@@ -20,6 +20,7 @@ const ownedVideo = {
   id: ids.video,
   status: "UPLOADED",
   trickSlug: "kickflip",
+  stance: "REGULAR",
 } satisfies OwnedVideoForQueuedAnalysis;
 
 const insertedAnalysis = {
@@ -167,6 +168,24 @@ describe("createQueuedAnalysisCreator", () => {
       expect(insertedValues).toEqual([]);
     },
   );
+
+  it("does not insert an analysis when the owner has not set a stance", async () => {
+    const {
+      creator,
+      createProvider,
+      insertedValues,
+      resolvePromptVersion,
+    } = setup({
+      ownedVideo: { ...ownedVideo, stance: null },
+    });
+
+    await expect(creator({ videoId: ids.video })).rejects.toMatchObject({
+      code: "STANCE_REQUIRED",
+    } satisfies Partial<QueuedAnalysisCreationError>);
+    expect(insertedValues).toEqual([]);
+    expect(createProvider).not.toHaveBeenCalled();
+    expect(resolvePromptVersion).not.toHaveBeenCalled();
+  });
 
   it("returns the existing analysis when one is already in progress", async () => {
     const existingAnalysis = {

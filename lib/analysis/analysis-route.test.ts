@@ -138,6 +138,24 @@ describe("analysis route", () => {
     }
   });
 
+  it("returns a dedicated error code when the profile stance is missing", async () => {
+    const { createQueuedAnalysis, handler, scheduled } = setup();
+    createQueuedAnalysis.mockRejectedValue(
+      new QueuedAnalysisCreationError(
+        "STANCE_REQUIRED",
+        "set a profile stance",
+      ),
+    );
+
+    const response = await handler(request());
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "STANCE_REQUIRED" },
+    });
+    expect(scheduled).toHaveLength(0);
+  });
+
   it("reports a rejected background task without leaving an unhandled promise", async () => {
     const { handler, reportUnexpectedError, runQueuedAnalysis, scheduled } =
       setup();

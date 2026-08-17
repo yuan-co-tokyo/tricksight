@@ -75,6 +75,8 @@ export function createAnalysisRouteHandler(dependencies: Dependencies) {
             return errorResponse("VIDEO_NOT_FOUND", 404);
           case "VIDEO_NOT_READY":
             return errorResponse("VIDEO_NOT_READY", 409);
+          case "STANCE_REQUIRED":
+            return errorResponse("STANCE_REQUIRED", 422);
           case "PROMPT_UNAVAILABLE":
             return errorResponse("PROMPT_UNAVAILABLE", 422);
           case "CONCURRENT_STATE_CHANGED":
