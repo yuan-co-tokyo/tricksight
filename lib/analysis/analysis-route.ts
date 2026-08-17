@@ -79,6 +79,28 @@ export function createAnalysisRouteHandler(dependencies: Dependencies) {
             return errorResponse("STANCE_REQUIRED", 422);
           case "PROMPT_UNAVAILABLE":
             return errorResponse("PROMPT_UNAVAILABLE", 422);
+          case "DAILY_LIMIT_REACHED":
+            if (error.limit === null || error.resetAt === null) {
+              reportUnexpectedError(error);
+              return errorResponse("ANALYSIS_QUEUE_FAILED", 500);
+            }
+
+            return Response.json(
+              {
+                error: {
+                  code: "ANALYSIS_DAILY_LIMIT_REACHED",
+                  limit: error.limit,
+                  resetAt: error.resetAt.toISOString(),
+                },
+              },
+              {
+                status: 429,
+                headers: {
+                  ...NO_STORE_HEADERS,
+                  "Retry-After": error.resetAt.toUTCString(),
+                },
+              },
+            );
           case "CONCURRENT_STATE_CHANGED":
             return errorResponse("ANALYSIS_STATE_CHANGED", 409);
         }

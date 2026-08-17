@@ -2,13 +2,17 @@ import { z } from "zod";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  DAILY_ANALYSIS_LIMIT,
   QueuedAnalysisCreationError,
   createQueuedAnalysisCreator,
+  getAnalysisDailyWindow,
   type InProgressAnalysis,
   type OwnedVideoForQueuedAnalysis,
   type QueuedAnalysisInsert,
   type QueuedAnalysisStore,
 } from "./queued-analysis-core";
+
+const now = new Date("2026-08-17T03:00:00.000Z");
 
 const ids = {
   video: "00000000-0000-4000-8000-000000000001",
@@ -32,19 +36,34 @@ const insertedAnalysis = {
   status: "QUEUED",
 } satisfies InProgressAnalysis;
 
+type HistoricalAnalysis = Omit<InProgressAnalysis, "status"> & {
+  status: "COMPLETED" | "FAILED";
+  resultJson: unknown;
+};
+
 function createMockStore(options: {
   ownedVideo?: OwnedVideoForQueuedAnalysis | null;
   insertResults?: Array<InProgressAnalysis | null>;
   existingAnalysis?: InProgressAnalysis | null;
+  dailyAnalysisCount?: number;
+  quotaLocked?: boolean;
+  historicalAnalyses?: HistoricalAnalysis[];
 } = {}) {
   const events: string[] = [];
   const insertedValues: QueuedAnalysisInsert[] = [];
   const selectedVideo =
     options.ownedVideo === undefined ? ownedVideo : options.ownedVideo;
   const insertResults = options.insertResults ?? [insertedAnalysis];
+  const analysisRows: Array<InProgressAnalysis | HistoricalAnalysis> = [
+    ...(options.historicalAnalyses ?? []),
+  ];
   let insertAttempt = 0;
 
   const transaction = {
+    lockUserAnalysisQuota: vi.fn(async () => {
+      events.push("quota:lock-user");
+      return options.quotaLocked ?? true;
+    }),
     findOwnedVideo: vi.fn(async () => {
       events.push("video:find-owned");
       return selectedVideo;
@@ -54,7 +73,12 @@ function createMockStore(options: {
       insertedValues.push(values);
       const result = insertResults[insertAttempt] ?? null;
       insertAttempt += 1;
+      if (result) analysisRows.push(result);
       return result;
+    }),
+    countUserAnalysesInWindow: vi.fn(async () => {
+      events.push("quota:count-created");
+      return options.dailyAnalysisCount ?? 0;
     }),
     findInProgressAnalysis: vi.fn(async () => {
       events.push("analysis:find-in-progress");
@@ -76,7 +100,7 @@ function createMockStore(options: {
     },
   };
 
-  return { events, insertedValues, store, transaction };
+  return { analysisRows, events, insertedValues, store, transaction };
 }
 
 function setup(options: Parameters<typeof createMockStore>[0] = {}) {
@@ -97,6 +121,7 @@ function setup(options: Parameters<typeof createMockStore>[0] = {}) {
     createProvider,
     resolvePromptVersion,
     createId: () => ids.analysis,
+    now: () => now,
   });
 
   return {
@@ -149,6 +174,7 @@ describe("createQueuedAnalysisCreator", () => {
     expect(resolvePromptVersion).not.toHaveBeenCalled();
     expect(events).toEqual([
       "transaction:start",
+      "quota:lock-user",
       "video:find-owned",
       "transaction:rollback",
     ]);
@@ -204,8 +230,8 @@ describe("createQueuedAnalysisCreator", () => {
     });
     expect(events).toEqual([
       "transaction:start",
+      "quota:lock-user",
       "video:find-owned",
-      "analysis:insert",
       "analysis:find-in-progress",
       "transaction:commit",
     ]);
@@ -222,8 +248,32 @@ describe("createQueuedAnalysisCreator", () => {
       analysis: insertedAnalysis,
     });
     expect(transaction.insertQueuedAnalysis).toHaveBeenCalledTimes(2);
-    expect(transaction.findInProgressAnalysis).toHaveBeenCalledOnce();
+    expect(transaction.findInProgressAnalysis).toHaveBeenCalledTimes(2);
   });
+
+  it.each(["FAILED", "COMPLETED"] as const)(
+    "keeps the existing %s row immutable and inserts a new QUEUED row",
+    async (status) => {
+      const historicalAnalysis = {
+        ...insertedAnalysis,
+        id: ids.existingAnalysis,
+        provider: "historical-provider",
+        modelId: "historical-model",
+        promptVersion: "historical-prompt-v1",
+        status,
+        resultJson: { preserved: true },
+      } satisfies HistoricalAnalysis;
+      const { analysisRows, creator } = setup({
+        historicalAnalyses: [historicalAnalysis],
+      });
+
+      await expect(creator({ videoId: ids.video })).resolves.toEqual({
+        outcome: "CREATED",
+        analysis: insertedAnalysis,
+      });
+      expect(analysisRows).toEqual([historicalAnalysis, insertedAnalysis]);
+    },
+  );
 
   it("rejects input that attempts to supply userId", async () => {
     const { creator, insertedValues } = setup();
@@ -242,6 +292,7 @@ describe("createQueuedAnalysisCreator", () => {
       createProvider: vi.fn(),
       resolvePromptVersion: vi.fn(),
       createId: vi.fn(),
+      now: vi.fn(),
     });
 
     await expect(creator({ videoId: ids.video })).rejects.toMatchObject({
@@ -260,5 +311,65 @@ describe("createQueuedAnalysisCreator", () => {
       code: "PROMPT_UNAVAILABLE",
     } satisfies Partial<QueuedAnalysisCreationError>);
     expect(insertedValues).toEqual([]);
+  });
+});
+
+describe("analysis daily limit", () => {
+  it("uses a JST calendar day and resets exactly at midnight", () => {
+    expect(
+      getAnalysisDailyWindow(new Date("2026-08-17T14:59:59.999Z")),
+    ).toEqual({
+      startsAt: new Date("2026-08-16T15:00:00.000Z"),
+      resetsAt: new Date("2026-08-17T15:00:00.000Z"),
+    });
+    expect(
+      getAnalysisDailyWindow(new Date("2026-08-17T15:00:00.000Z")),
+    ).toEqual({
+      startsAt: new Date("2026-08-17T15:00:00.000Z"),
+      resetsAt: new Date("2026-08-18T15:00:00.000Z"),
+    });
+  });
+
+  it("does not create a row after ten analyses have been created", async () => {
+    const {
+      creator,
+      createProvider,
+      insertedValues,
+      resolvePromptVersion,
+      transaction,
+    } = setup({ dailyAnalysisCount: DAILY_ANALYSIS_LIMIT });
+
+    await expect(creator({ videoId: ids.video })).rejects.toMatchObject({
+      code: "DAILY_LIMIT_REACHED",
+      limit: DAILY_ANALYSIS_LIMIT,
+      resetAt: new Date("2026-08-17T15:00:00.000Z"),
+    } satisfies Partial<QueuedAnalysisCreationError>);
+    expect(transaction.countUserAnalysesInWindow).toHaveBeenCalledWith({
+      userId: "user-from-session",
+      startsAt: new Date("2026-08-16T15:00:00.000Z"),
+      endsBefore: new Date("2026-08-17T15:00:00.000Z"),
+    });
+    expect(insertedValues).toEqual([]);
+    expect(createProvider).not.toHaveBeenCalled();
+    expect(resolvePromptVersion).not.toHaveBeenCalled();
+  });
+
+  it("returns an existing in-progress row without consuming a new slot", async () => {
+    const existingAnalysis = {
+      ...insertedAnalysis,
+      id: ids.existingAnalysis,
+      status: "ANALYZING",
+    } satisfies InProgressAnalysis;
+    const { creator, transaction } = setup({
+      dailyAnalysisCount: DAILY_ANALYSIS_LIMIT,
+      existingAnalysis,
+    });
+
+    await expect(creator({ videoId: ids.video })).resolves.toEqual({
+      outcome: "ALREADY_IN_PROGRESS",
+      analysis: existingAnalysis,
+    });
+    expect(transaction.countUserAnalysesInWindow).not.toHaveBeenCalled();
+    expect(transaction.insertQueuedAnalysis).not.toHaveBeenCalled();
   });
 });

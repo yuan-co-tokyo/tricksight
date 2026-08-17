@@ -1,7 +1,7 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, count, eq, gte, inArray, lt, sql } from "drizzle-orm";
 
 import { createVideoAnalysisProvider } from "@/lib/analysis/provider-factory";
 import { getCurrentUser } from "@/lib/current-user";
@@ -26,6 +26,17 @@ const queuedAnalysisStore: QueuedAnalysisStore = {
   transaction(operation) {
     return db.transaction(async (tx) =>
       operation({
+        async lockUserAnalysisQuota(userId) {
+          const [lockedUser] = await tx
+            .select({ id: user.id })
+            .from(user)
+            .where(eq(user.id, userId))
+            .limit(1)
+            .for("update");
+
+          return lockedUser !== undefined;
+        },
+
         async findOwnedVideo(input) {
           const [video] = await tx
             .select({
@@ -51,6 +62,26 @@ const queuedAnalysisStore: QueuedAnalysisStore = {
             .for("share");
 
           return video ?? null;
+        },
+
+        async countUserAnalysesInWindow(input) {
+          const [result] = await tx
+            .select({ value: count(analyses.id) })
+            .from(analyses)
+            .innerJoin(videos, eq(videos.id, analyses.videoId))
+            .innerJoin(
+              practiceSessions,
+              eq(practiceSessions.id, videos.sessionId),
+            )
+            .where(
+              and(
+                eq(practiceSessions.userId, input.userId),
+                gte(analyses.createdAt, input.startsAt),
+                lt(analyses.createdAt, input.endsBefore),
+              ),
+            );
+
+          return result?.value ?? 0;
         },
 
         async insertQueuedAnalysis(values) {
@@ -122,6 +153,7 @@ export const createQueuedAnalysis = createQueuedAnalysisCreator({
   resolvePromptVersion: (trickSlug) =>
     getPromptForTrick(trickSlug).version,
   createId: randomUUID,
+  now: () => new Date(),
 });
 
 export {

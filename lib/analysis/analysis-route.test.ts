@@ -156,6 +156,32 @@ describe("analysis route", () => {
     expect(scheduled).toHaveLength(0);
   });
 
+  it("returns the daily limit and its reset time without creating work", async () => {
+    const { createQueuedAnalysis, handler, scheduled } = setup();
+    const resetAt = new Date("2026-08-17T15:00:00.000Z");
+    createQueuedAnalysis.mockRejectedValue(
+      new QueuedAnalysisCreationError(
+        "DAILY_LIMIT_REACHED",
+        "daily limit reached",
+        { limit: 10, resetAt },
+      ),
+    );
+
+    const response = await handler(request());
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(response.headers.get("Retry-After")).toBe(resetAt.toUTCString());
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "ANALYSIS_DAILY_LIMIT_REACHED",
+        limit: 10,
+        resetAt: "2026-08-17T15:00:00.000Z",
+      },
+    });
+    expect(scheduled).toHaveLength(0);
+  });
+
   it("reports a rejected background task without leaving an unhandled promise", async () => {
     const { handler, reportUnexpectedError, runQueuedAnalysis, scheduled } =
       setup();

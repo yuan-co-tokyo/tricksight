@@ -11,6 +11,28 @@ type AnalysisInsert = typeof analyses.$inferInsert;
 type VideoStatus = (typeof videoStatusEnum.enumValues)[number];
 type AnalysisStatus = (typeof analysisStatusEnum.enumValues)[number];
 
+const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1_000;
+const JST_OFFSET_MS = 9 * 60 * 60 * 1_000;
+
+export const DAILY_ANALYSIS_LIMIT = 10;
+
+export type AnalysisDailyWindow = {
+  startsAt: Date;
+  resetsAt: Date;
+};
+
+export function getAnalysisDailyWindow(now: Date): AnalysisDailyWindow {
+  const jstTimestamp = now.getTime() + JST_OFFSET_MS;
+  const jstDayStart =
+    Math.floor(jstTimestamp / MILLISECONDS_PER_DAY) * MILLISECONDS_PER_DAY;
+  const startsAtTimestamp = jstDayStart - JST_OFFSET_MS;
+
+  return {
+    startsAt: new Date(startsAtTimestamp),
+    resetsAt: new Date(startsAtTimestamp + MILLISECONDS_PER_DAY),
+  };
+}
+
 export type OwnedVideoForQueuedAnalysis = {
   id: string;
   status: VideoStatus;
@@ -33,10 +55,16 @@ export type InProgressAnalysis = {
 };
 
 export interface QueuedAnalysisTransaction {
+  lockUserAnalysisQuota(userId: string): Promise<boolean>;
   findOwnedVideo(input: {
     userId: string;
     videoId: string;
   }): Promise<OwnedVideoForQueuedAnalysis | null>;
+  countUserAnalysesInWindow(input: {
+    userId: string;
+    startsAt: Date;
+    endsBefore: Date;
+  }): Promise<number>;
   insertQueuedAnalysis(
     values: QueuedAnalysisInsert,
   ): Promise<InProgressAnalysis | null>;
@@ -55,6 +83,7 @@ export type QueuedAnalysisCreatorDependencies = {
   createProvider(): Pick<VideoAnalysisProvider, "providerName" | "modelId">;
   resolvePromptVersion(trickSlug: string): string;
   createId(): string;
+  now(): Date;
 };
 
 export type QueuedAnalysisCreationErrorCode =
@@ -63,19 +92,29 @@ export type QueuedAnalysisCreationErrorCode =
   | "VIDEO_NOT_READY"
   | "STANCE_REQUIRED"
   | "PROMPT_UNAVAILABLE"
+  | "DAILY_LIMIT_REACHED"
   | "CONCURRENT_STATE_CHANGED";
+
+type QueuedAnalysisCreationErrorOptions = ErrorOptions & {
+  limit?: number;
+  resetAt?: Date;
+};
 
 export class QueuedAnalysisCreationError extends Error {
   readonly code: QueuedAnalysisCreationErrorCode;
+  readonly limit: number | null;
+  readonly resetAt: Date | null;
 
   constructor(
     code: QueuedAnalysisCreationErrorCode,
     message: string,
-    options?: ErrorOptions,
+    options?: QueuedAnalysisCreationErrorOptions,
   ) {
     super(message, options);
     this.name = "QueuedAnalysisCreationError";
     this.code = code;
+    this.limit = options?.limit ?? null;
+    this.resetAt = options?.resetAt ?? null;
   }
 }
 
@@ -121,6 +160,18 @@ export function createQueuedAnalysisCreator(
     const parsedInput = createQueuedAnalysisInputSchema.parse(input);
 
     return dependencies.store.transaction(async (transaction) => {
+      // 同一ユーザーの上限判定とINSERTを直列化し、並列リクエストでの超過を防ぐ。
+      const quotaLocked = await transaction.lockUserAnalysisQuota(
+        currentUser.id,
+      );
+
+      if (!quotaLocked) {
+        throw new QueuedAnalysisCreationError(
+          "UNAUTHENTICATED",
+          "The authenticated user no longer exists.",
+        );
+      }
+
       const video = await transaction.findOwnedVideo({
         userId: currentUser.id,
         videoId: parsedInput.videoId,
@@ -144,6 +195,35 @@ export function createQueuedAnalysisCreator(
         throw new QueuedAnalysisCreationError(
           "STANCE_REQUIRED",
           "Set a stance in the profile before requesting analysis.",
+        );
+      }
+
+      // 重複送信は新しい枠を消費せず、T6-1と同じ既存行を返す。
+      const inProgress = await transaction.findInProgressAnalysis(video.id);
+
+      if (inProgress) {
+        return {
+          outcome: "ALREADY_IN_PROGRESS",
+          analysis: inProgress,
+        };
+      }
+
+      const dailyWindow = getAnalysisDailyWindow(dependencies.now());
+      const dailyAnalysisCount =
+        await transaction.countUserAnalysesInWindow({
+          userId: currentUser.id,
+          startsAt: dailyWindow.startsAt,
+          endsBefore: dailyWindow.resetsAt,
+        });
+
+      if (dailyAnalysisCount >= DAILY_ANALYSIS_LIMIT) {
+        throw new QueuedAnalysisCreationError(
+          "DAILY_LIMIT_REACHED",
+          "The daily analysis limit has been reached.",
+          {
+            limit: DAILY_ANALYSIS_LIMIT,
+            resetAt: dailyWindow.resetsAt,
+          },
         );
       }
 
