@@ -214,6 +214,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
               <li key={session.id}>
                 <Link
                   href={`/history/${session.id}`}
+                  prefetch={false}
                   aria-label={`${session.trick.name} ${practiceDateFormatter.format(session.practicedAt)}の詳細を見る`}
                   className="group block rounded-xl focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
                 >

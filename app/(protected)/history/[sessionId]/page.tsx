@@ -30,6 +30,11 @@ import {
   formatTimestampSeconds,
   getCompletedAnalysisResult,
 } from "@/lib/history-detail";
+import {
+  isPlayableVideoStatus,
+  type PlaybackVideoStatus,
+} from "@/lib/uploads/video-playback-url-core";
+import { createOwnedVideoPlaybackUrl } from "@/lib/uploads/video-playback-url";
 import { cn } from "@/lib/utils";
 
 type HistoryDetailPageProps = {
@@ -412,6 +417,64 @@ function AnalysisMetadata({
   );
 }
 
+function VideoPlayback({
+  video,
+  playbackUrl,
+  playbackUrlFailed,
+}: {
+  video: HistoryDetail["video"];
+  playbackUrl: string | null;
+  playbackUrlFailed: boolean;
+}) {
+  if (playbackUrl && video) {
+    return (
+      <>
+        <div className="flex max-h-[70svh] min-h-40 items-center justify-center overflow-hidden rounded-lg border border-border bg-black">
+          <video
+            src={playbackUrl}
+            controls
+            playsInline
+            preload="metadata"
+            aria-label={`${video.originalFilename} の再生`}
+            className="max-h-[70svh] w-full object-contain"
+          />
+        </div>
+        <p className="text-xs leading-5 text-muted-foreground">
+          再生URLはページを表示するたびに短時間だけ発行されます。期限切れの場合はページを再読み込みしてください。
+        </p>
+      </>
+    );
+  }
+
+  let title = "この練習に動画はありません";
+  let description = "動画が登録されると、ここで再生できます。";
+
+  if (video && !isPlayableVideoStatus(video.status as PlaybackVideoStatus)) {
+    title =
+      video.status === "PENDING_UPLOAD"
+        ? "動画のアップロードを確認中です"
+        : "この動画は再生できません";
+    description =
+      video.status === "PENDING_UPLOAD"
+        ? "アップロードの確認が完了すると再生できるようになります。"
+        : "動画のアップロードに失敗したため、再生URLを発行していません。";
+  } else if (playbackUrlFailed) {
+    title = "動画を読み込めませんでした";
+    description =
+      "再生URLを発行できませんでした。時間をおいてページを再読み込みしてください。";
+  }
+
+  return (
+    <div className="grid min-h-40 place-items-center overflow-hidden rounded-lg border border-border bg-muted text-center text-muted-foreground sm:min-h-56">
+      <span className="grid max-w-xs justify-items-center gap-2 px-4 text-sm">
+        <VideoIcon aria-hidden="true" className="size-8" />
+        <span className="font-medium text-foreground">{title}</span>
+        <span className="text-xs leading-5">{description}</span>
+      </span>
+    </div>
+  );
+}
+
 export default async function HistoryDetailPage({
   params,
 }: HistoryDetailPageProps) {
@@ -423,6 +486,17 @@ export default async function HistoryDetailPage({
   const session = await getPracticeSessionDetail(user.id, sessionId);
 
   if (!session) notFound();
+
+  let playbackUrl: string | null = null;
+  let playbackUrlFailed = false;
+
+  try {
+    // getPracticeSessionDetailの所有者スコープを通った動画だけを署名対象にする。
+    playbackUrl = await createOwnedVideoPlaybackUrl(session);
+  } catch (error) {
+    playbackUrlFailed = true;
+    console.error("Failed to issue a video playback URL.", error);
+  }
 
   const outcome = outcomePresentation[session.userOutcome];
 
@@ -459,18 +533,11 @@ export default async function HistoryDetailPage({
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {/* TODO(T5-4): S3の期限付き再生URLを発行し、動画プレーヤーへ置き換える。 */}
-            <div className="grid aspect-video place-items-center overflow-hidden rounded-lg border border-border bg-muted text-center text-muted-foreground">
-              <span className="grid max-w-xs justify-items-center gap-2 px-4 text-sm">
-                <VideoIcon aria-hidden="true" className="size-8" />
-                <span className="font-medium text-foreground">
-                  動画再生は準備中です
-                </span>
-                <span className="text-xs leading-5">
-                  期限付き再生URLは次の実装で追加します。
-                </span>
-              </span>
-            </div>
+            <VideoPlayback
+              video={session.video}
+              playbackUrl={playbackUrl}
+              playbackUrlFailed={playbackUrlFailed}
+            />
             {session.video ? (
               <p className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
                 <FileVideoIcon aria-hidden="true" className="size-4 shrink-0" />

@@ -170,6 +170,7 @@ function LatestAnalysisCard({
 
         <Link
           href={`/history/${latestAnalysis.sessionId}`}
+          prefetch={false}
           className="mt-auto inline-flex min-h-9 items-center justify-end gap-1 rounded-lg text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
         >
           分析詳細を見る
@@ -232,6 +233,7 @@ function LatestImprovementsCard({
             </ol>
             <Link
               href={`/history/${latestCompletedAnalysis.sessionId}`}
+              prefetch={false}
               className="mt-auto inline-flex min-h-9 items-center justify-end gap-1 rounded-lg text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
             >
               改善点の詳細を見る
@@ -292,6 +294,7 @@ function RecentVideosCard({
               <li key={item.video.id}>
                 <Link
                   href={`/history/${item.sessionId}`}
+                  prefetch={false}
                   className="group grid min-w-0 gap-3 rounded-lg py-3 transition-colors hover:bg-muted/40 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none sm:grid-cols-[2.5rem_minmax(0,1fr)_auto] sm:items-center sm:px-2"
                 >
                   <span className="grid size-10 place-items-center rounded-lg bg-muted text-muted-foreground">
