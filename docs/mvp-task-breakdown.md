@@ -92,12 +92,50 @@ T1-6 の実測（kickflip-001、スロー撮影なし・正面）:
 
 依頼者の判断により品質ゲートは後回しとしT6まで作るが、**この所見はプロダクトの成立性に直結する**ため、H-1（スロー撮影を含む評価動画10本）の収集後に最優先で再評価すること。改善は計画書§18の順序（1.スロー撮影の要求を強める → 2.モデル選択 → 3.プロンプト改善）で行う。
 
+### T6 のローカル通し確認（2026-08-17）
+
+ローカルの dev サーバーに対して、ユーザー作成 → stance 設定 → Presigned POST 発行 → S3 直接アップロード → 完了通知 → 分析実行 → ステータスポーリング → DB 検証、までを実APIで通した。
+
+**動作した箇所:**
+
+- S3アップロード 204（18,048,818 bytes）、完了通知 200 で `videos.status=UPLOADED`
+- `s3_key` が §15 の形式 `private/{userId}/{sessionId}/{videoId}/original.mp4` になっている
+- 分析APIが 202 `{analysisId, status:"QUEUED"}` を返し、`QUEUED → ANALYZING → 決着` を約26秒で遷移
+- `provider=twelvelabs` / `model_id=pegasus1.5` / `prompt_version=common-system-v1+kickflip-v1` / `attempt_count=1` / `started_at`・`completed_at` が記録される
+- ステータスAPIの返却キーは `analysisId` / `status` / `error` のみ。`raw_response` と `errorMessage` の露出なし（§15を満たす）
+
+**検出したバグ2件（未修正・coderの枠回復後に対応）:**
+
+#### B-1: `result.confidence` が範囲外で毎回スキーマ検証に落ちる（優先度: 高）
+
+```
+error_code: SCHEMA_VALIDATION_FAILED
+result.confidence — "Too big: expected number to be <=1"
+```
+
+TwelveLabs は JSON Schema の numeric constraints を受け付けないため、APIへ渡すスキーマから `minimum`/`maximum` を除去している（上記「TwelveLabs の JSON Schema 制約」参照）。その結果モデルは範囲を知らずに回答する。
+
+`prompts/common-system-v1.ts` は **`scores` の 0〜100 スケールを6段階で詳細に定義している一方、`confidence` の 0〜1 スケールには一切触れていない**。モデルが scores と同じスケールで `confidence` を返したと考えられる。
+
+成功ケースでも再現する可能性が高く、これが直らないと分析結果が1件も保存されない。T7 の前に修正すること。
+
+対応方針：まず `common-system-v1.ts` に `confidence` が 0〜1 の小数であることを明記する。プロンプト修正だけで安定するかを実測で確認し、不安定ならプロバイダ側での正規化を検討する。
+
+#### B-2: 検証失敗時に `raw_response` が保存されない（優先度: 中）
+
+スキーマ検証で落ちた分析の `raw_response` が null のため、**モデルが実際に返した値が分からない**。B-1 でも「confidence が 90 だったのか 1.5 だったのか」を確認できなかった。
+
+T1-6-fix1 で `error_message` にAPIエラー本文を保存する対応を入れたが、`raw_response` は成功時のみ保存される作りになっている。検証失敗時こそ診断に必要なので、失敗時も保存すること（§15のとおりクライアントへは返さない）。
+
 ### 未解決の課題
 
 | 課題 | 内容 |
 | --- | --- |
+| B-1 confidence範囲外 | 分析が毎回失敗する可能性。T7の前に修正必須 |
+| B-2 失敗時のraw_response | 診断ができない。B-1の調査にも必要 |
+| Vercel OIDC未実装 | `AWS_ROLE_ARN` / `AssumeRole` / `@vercel/functions` いずれも未実装。§5・§15により本番へ静的アクセスキーを置けないため、本番での分析実行の前提 |
 | 分析品質 | 成功・失敗の判定が2件中2件で誤り（上記）。H-1後に最優先で再評価 |
-| 評価動画 | H-1 未着手。現在2本（ともにKICKFLIP・スロー版なし） |
+| 評価動画 | H-1 未着手。失敗した試技を含むセットが必要 |
 
 ## 前提
 
