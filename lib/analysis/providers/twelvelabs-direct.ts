@@ -5,6 +5,7 @@ import { TwelveLabs, type TwelvelabsApi } from "twelvelabs-js";
 import {
   appendVideoContext,
   getPromptForTrick,
+  promptVersionFamily,
 } from "../../../prompts/common-system-v1";
 
 import {
@@ -27,7 +28,7 @@ const DEFAULT_ASSET_POLL_TIMEOUT_MS = 120_000;
 const DEFAULT_ASSET_POLL_INTERVAL_MS = 3_000;
 const DEFAULT_ANALYZE_TIMEOUT_MS = 150_000;
 const DEFAULT_MAX_TOKENS = 2_000;
-const SUPPORTED_PROMPT_VERSION: PromptVersionFamily = "v1";
+const SUPPORTED_PROMPT_VERSION: PromptVersionFamily = promptVersionFamily;
 const twelveLabsAnalysisJsonSchema = toProviderJsonSchema(
   skateAnalysisResultJsonSchema,
   {

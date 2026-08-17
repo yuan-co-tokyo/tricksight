@@ -9,6 +9,7 @@ import {
 } from "./pop-shove-it-v1";
 
 export const version = "common-system-v1";
+export const promptVersionFamily = "v1" as const;
 
 export const prompt = `あなたはスケートボードの映像コーチです。映像から直接観察できる事実だけに基づき、日本語で回答してください。見えない動きや映像だけでは確信できないことを推測してはいけません。
 
@@ -41,6 +42,16 @@ scoresの項目別観察基準:
 - landing: ボードの水平、両足の着地位置、膝での衝撃吸収、着地後にバランスと進行方向を保てているかを見ます。`;
 
 export type SupportedTrickSlug = "ollie" | "pop-shove-it" | "kickflip";
+
+export function isSupportedTrickSlug(
+  trickSlug: string,
+): trickSlug is SupportedTrickSlug {
+  return (
+    trickSlug === "ollie" ||
+    trickSlug === "pop-shove-it" ||
+    trickSlug === "kickflip"
+  );
+}
 
 export type ResolvedTrickPrompt = {
   version: string;
@@ -76,11 +87,7 @@ function resolveTrickPrompt(trickSlug: SupportedTrickSlug) {
 }
 
 export function getPromptForTrick(trickSlug: string): ResolvedTrickPrompt {
-  if (
-    trickSlug !== "ollie" &&
-    trickSlug !== "pop-shove-it" &&
-    trickSlug !== "kickflip"
-  ) {
+  if (!isSupportedTrickSlug(trickSlug)) {
     throw new Error(`未対応のトリックスラッグです: ${trickSlug}`);
   }
 
