@@ -150,6 +150,9 @@ export const analyses = pgTable(
   (table) => [
     index("analyses_video_created_at_idx").on(table.videoId, table.createdAt),
     index("analyses_status_created_at_idx").on(table.status, table.createdAt),
+    uniqueIndex("analyses_video_in_progress_uidx")
+      .on(table.videoId)
+      .where(sql`${table.status} in ('QUEUED', 'ANALYZING')`),
     check("analyses_attempt_count_check", sql`${table.attemptCount} >= 0`),
   ],
 );

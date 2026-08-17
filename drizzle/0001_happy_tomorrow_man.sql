@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "analyses_video_in_progress_uidx" ON "analyses" USING btree ("video_id") WHERE "analyses"."status" in ('QUEUED', 'ANALYZING');
