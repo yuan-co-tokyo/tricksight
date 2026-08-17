@@ -105,8 +105,25 @@ describe("history query builders", () => {
     expect(query.params).toContain(sessionId);
     expect(query.params).not.toContain("user-a");
     expect(sql).not.toContain("raw_response");
+    expect(sql).not.toContain("error_message");
     expect(sql).toMatch(/limit \$\d+$/);
     expect(query.params.at(-1)).toBe(1);
+  });
+
+  it("never selects raw provider data or internal error details for history consumers", () => {
+    const userId = "user-a";
+    const queries = [
+      buildPracticeSessionListQuery(database, userId).toSQL(),
+      buildPracticeSessionDetailQuery(database, userId, "session-a").toSQL(),
+      buildDashboardLatestAnalysisQuery(database, userId).toSQL(),
+      buildDashboardLatestCompletedAnalysisQuery(database, userId).toSQL(),
+    ];
+
+    for (const query of queries) {
+      const sql = compactSql(query.sql);
+      expect(sql).not.toContain("raw_response");
+      expect(sql).not.toContain("error_message");
+    }
   });
 
   it("scopes every dashboard query and joins videos through sessions", () => {

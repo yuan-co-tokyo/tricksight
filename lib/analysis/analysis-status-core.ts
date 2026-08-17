@@ -1,3 +1,8 @@
+import {
+  publicAnalysisFailure,
+  type PublicAnalysisError,
+} from "./analysis-public-error";
+
 export const STUCK_ANALYSIS_THRESHOLD_MS = 10 * 60 * 1_000;
 export const STUCK_ANALYSIS_ERROR_CODE = "ANALYSIS_STUCK_TIMEOUT";
 
@@ -17,7 +22,7 @@ export type OwnedAnalysisStatusRecord = {
 export type AnalysisStatusResult = {
   analysisId: string;
   status: AnalysisStatus;
-  errorCode: string | null;
+  error: PublicAnalysisError | null;
 };
 
 export interface AnalysisStatusStore {
@@ -47,8 +52,11 @@ function publicStatus(
   return {
     analysisId: record.id,
     status: record.status,
-    // DBのerror_messageにはプロバイダー詳細が入り得るため公開しない。
-    errorCode: record.errorCode,
+    // DBのerror_code/error_messageは内部診断専用。公開コードへ必ず変換する。
+    error:
+      record.status === "FAILED"
+        ? publicAnalysisFailure(record.errorCode)
+        : null,
   };
 }
 

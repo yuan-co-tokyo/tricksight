@@ -1,6 +1,10 @@
 import { z } from "zod";
 
 import type { AnalysisStatusResult } from "./analysis-status-core";
+import {
+  ANALYSIS_REQUEST_ERRORS,
+  type PublicAnalysisError,
+} from "./analysis-public-error";
 
 const NO_STORE_HEADERS = {
   "Cache-Control": "no-store",
@@ -19,9 +23,9 @@ type AnalysisStatusRouteContext = {
   params: Promise<{ analysisId: string }>;
 };
 
-function errorResponse(code: string, status: number) {
+function errorResponse(error: PublicAnalysisError, status: number) {
   return Response.json(
-    { error: { code } },
+    { error },
     { status, headers: NO_STORE_HEADERS },
   );
 }
@@ -45,14 +49,16 @@ export function createAnalysisStatusRouteHandler(
       currentUser = await dependencies.resolveCurrentUser();
     } catch (error) {
       reportUnexpectedError(error);
-      return errorResponse("ANALYSIS_STATUS_FAILED", 500);
+      return errorResponse(ANALYSIS_REQUEST_ERRORS.ANALYSIS_UNAVAILABLE, 500);
     }
 
-    if (!currentUser) return errorResponse("UNAUTHENTICATED", 401);
+    if (!currentUser) {
+      return errorResponse(ANALYSIS_REQUEST_ERRORS.UNAUTHENTICATED, 401);
+    }
 
     const { analysisId } = await context.params;
     if (!z.uuid().safeParse(analysisId).success) {
-      return errorResponse("ANALYSIS_NOT_FOUND", 404);
+      return errorResponse(ANALYSIS_REQUEST_ERRORS.ANALYSIS_NOT_FOUND, 404);
     }
 
     try {
@@ -61,13 +67,15 @@ export function createAnalysisStatusRouteHandler(
         analysisId,
       });
 
-      if (!analysis) return errorResponse("ANALYSIS_NOT_FOUND", 404);
+      if (!analysis) {
+        return errorResponse(ANALYSIS_REQUEST_ERRORS.ANALYSIS_NOT_FOUND, 404);
+      }
 
       return Response.json(
         {
           analysisId: analysis.analysisId,
           status: analysis.status,
-          errorCode: analysis.errorCode,
+          error: analysis.error,
         },
         {
           status: 200,
@@ -76,7 +84,7 @@ export function createAnalysisStatusRouteHandler(
       );
     } catch (error) {
       reportUnexpectedError(error);
-      return errorResponse("ANALYSIS_STATUS_FAILED", 500);
+      return errorResponse(ANALYSIS_REQUEST_ERRORS.ANALYSIS_UNAVAILABLE, 500);
     }
   };
 }

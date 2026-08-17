@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ANALYSIS_REQUEST_ERRORS } from "./analysis-public-error";
 import { createAnalysisStatusRouteHandler } from "./analysis-status-route";
 
 const userId = "00000000-0000-4000-8000-000000000001";
@@ -10,25 +11,36 @@ function setup(options: {
   analysis?: {
     analysisId: string;
     status: "QUEUED" | "ANALYZING" | "COMPLETED" | "FAILED";
-    errorCode: string | null;
+    error: {
+      code: string;
+      message: string;
+      action: "RETRY_ANALYSIS";
+    } | null;
     errorMessage?: string;
     rawResponse?: unknown;
+    internalErrorCode?: string;
   } | null;
+  analysisError?: unknown;
 } = {}) {
   const currentUser =
     options.currentUser === undefined ? { id: userId } : options.currentUser;
   const analysis =
     options.analysis === undefined
-      ? { analysisId, status: "ANALYZING" as const, errorCode: null }
+      ? { analysisId, status: "ANALYZING" as const, error: null }
       : options.analysis;
   const resolveCurrentUser = vi.fn().mockResolvedValue(currentUser);
   const getOwnedAnalysisStatus = vi.fn().mockResolvedValue(analysis);
+  if (options.analysisError !== undefined) {
+    getOwnedAnalysisStatus.mockRejectedValue(options.analysisError);
+  }
+  const reportUnexpectedError = vi.fn();
   const handler = createAnalysisStatusRouteHandler({
     resolveCurrentUser,
     getOwnedAnalysisStatus,
+    reportUnexpectedError,
   });
 
-  return { getOwnedAnalysisStatus, handler };
+  return { getOwnedAnalysisStatus, handler, reportUnexpectedError };
 }
 
 function call(
@@ -46,7 +58,12 @@ describe("analysis status route", () => {
       analysis: {
         analysisId,
         status: "FAILED",
-        errorCode: "PROVIDER_FAILED",
+        error: {
+          code: "ANALYSIS_RETRYABLE",
+          message: "時間をおいてから再分析してください。",
+          action: "RETRY_ANALYSIS",
+        },
+        internalErrorCode: "ANALYZE_FAILED",
         errorMessage: "internal provider details",
         rawResponse: { providerPayload: "db-only" },
       },
@@ -59,7 +76,11 @@ describe("analysis status route", () => {
     await expect(response.json()).resolves.toEqual({
       analysisId,
       status: "FAILED",
-      errorCode: "PROVIDER_FAILED",
+      error: {
+        code: "ANALYSIS_RETRYABLE",
+        message: "時間をおいてから再分析してください。",
+        action: "RETRY_ANALYSIS",
+      },
     });
   });
 
@@ -70,7 +91,7 @@ describe("analysis status route", () => {
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
-      error: { code: "ANALYSIS_NOT_FOUND" },
+      error: ANALYSIS_REQUEST_ERRORS.ANALYSIS_NOT_FOUND,
     });
     expect(getOwnedAnalysisStatus).toHaveBeenCalledWith({
       userId,
@@ -94,8 +115,27 @@ describe("analysis status route", () => {
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({
-      error: { code: "UNAUTHENTICATED" },
+      error: ANALYSIS_REQUEST_ERRORS.UNAUTHENTICATED,
     });
     expect(getOwnedAnalysisStatus).not.toHaveBeenCalled();
+  });
+
+  it("does not expose a database error from the owner-scoped lookup", async () => {
+    const failure = new Error("postgres password=db-super-secret");
+    const { handler, reportUnexpectedError } = setup({
+      analysisError: failure,
+    });
+
+    const response = await call(handler);
+    const serialized = JSON.stringify(await response.json());
+
+    expect(response.status).toBe(500);
+    expect(serialized).toBe(
+      JSON.stringify({
+        error: ANALYSIS_REQUEST_ERRORS.ANALYSIS_UNAVAILABLE,
+      }),
+    );
+    expect(serialized).not.toContain("db-super-secret");
+    expect(reportUnexpectedError).toHaveBeenCalledWith(failure);
   });
 });

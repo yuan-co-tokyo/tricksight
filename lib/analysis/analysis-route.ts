@@ -5,6 +5,10 @@ import {
   type CreateQueuedAnalysisResult,
 } from "../db/mutations/queued-analysis-core";
 
+import {
+  ANALYSIS_REQUEST_ERRORS,
+  type PublicAnalysisError,
+} from "./analysis-public-error";
 import type { RunQueuedAnalysisResult } from "./run-queued-analysis-core";
 
 const NO_STORE_HEADERS = {
@@ -18,9 +22,9 @@ type Dependencies = {
   reportUnexpectedError?(error: unknown): void;
 };
 
-function errorResponse(code: string, status: number) {
+function errorResponse(error: PublicAnalysisError, status: number) {
   return Response.json(
-    { error: { code } },
+    { error },
     { status, headers: NO_STORE_HEADERS },
   );
 }
@@ -38,7 +42,7 @@ export function createAnalysisRouteHandler(dependencies: Dependencies) {
     try {
       body = await request.json();
     } catch {
-      return errorResponse("INVALID_REQUEST", 400);
+      return errorResponse(ANALYSIS_REQUEST_ERRORS.INVALID_REQUEST, 400);
     }
 
     try {
@@ -64,31 +68,37 @@ export function createAnalysisRouteHandler(dependencies: Dependencies) {
       );
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return errorResponse("INVALID_REQUEST", 400);
+        return errorResponse(ANALYSIS_REQUEST_ERRORS.INVALID_REQUEST, 400);
       }
 
       if (error instanceof QueuedAnalysisCreationError) {
         switch (error.code) {
           case "UNAUTHENTICATED":
-            return errorResponse("UNAUTHENTICATED", 401);
+            return errorResponse(ANALYSIS_REQUEST_ERRORS.UNAUTHENTICATED, 401);
           case "VIDEO_NOT_FOUND":
-            return errorResponse("VIDEO_NOT_FOUND", 404);
+            return errorResponse(ANALYSIS_REQUEST_ERRORS.VIDEO_NOT_FOUND, 404);
           case "VIDEO_NOT_READY":
-            return errorResponse("VIDEO_NOT_READY", 409);
+            return errorResponse(ANALYSIS_REQUEST_ERRORS.VIDEO_NOT_READY, 409);
           case "STANCE_REQUIRED":
-            return errorResponse("STANCE_REQUIRED", 422);
+            return errorResponse(ANALYSIS_REQUEST_ERRORS.STANCE_REQUIRED, 422);
           case "PROMPT_UNAVAILABLE":
-            return errorResponse("PROMPT_UNAVAILABLE", 422);
+            return errorResponse(ANALYSIS_REQUEST_ERRORS.ANALYSIS_UNAVAILABLE, 503);
           case "DAILY_LIMIT_REACHED":
             if (error.limit === null || error.resetAt === null) {
               reportUnexpectedError(error);
-              return errorResponse("ANALYSIS_QUEUE_FAILED", 500);
+              return errorResponse(
+                ANALYSIS_REQUEST_ERRORS.ANALYSIS_UNAVAILABLE,
+                500,
+              );
             }
 
             return Response.json(
               {
                 error: {
                   code: "ANALYSIS_DAILY_LIMIT_REACHED",
+                  message:
+                    "本日の分析上限に達しました。リセット時刻以降にもう一度お試しください。",
+                  action: "WAIT_FOR_RESET",
                   limit: error.limit,
                   resetAt: error.resetAt.toISOString(),
                 },
@@ -102,12 +112,15 @@ export function createAnalysisRouteHandler(dependencies: Dependencies) {
               },
             );
           case "CONCURRENT_STATE_CHANGED":
-            return errorResponse("ANALYSIS_STATE_CHANGED", 409);
+            return errorResponse(
+              ANALYSIS_REQUEST_ERRORS.ANALYSIS_STATE_CHANGED,
+              409,
+            );
         }
       }
 
       reportUnexpectedError(error);
-      return errorResponse("ANALYSIS_QUEUE_FAILED", 500);
+      return errorResponse(ANALYSIS_REQUEST_ERRORS.ANALYSIS_UNAVAILABLE, 500);
     }
   };
 }

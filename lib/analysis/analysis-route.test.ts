@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { QueuedAnalysisCreationError } from "../db/mutations/queued-analysis-core";
 
+import { ANALYSIS_REQUEST_ERRORS } from "./analysis-public-error";
 import { createAnalysisRouteHandler } from "./analysis-route";
 
 const analysisId = "00000000-0000-4000-8000-000000000001";
@@ -134,7 +135,9 @@ describe("analysis route", () => {
       const response = await handler(request());
 
       expect(response.status).toBe(status);
-      await expect(response.json()).resolves.toEqual({ error: { code } });
+      await expect(response.json()).resolves.toEqual({
+        error: ANALYSIS_REQUEST_ERRORS[code],
+      });
     }
   });
 
@@ -151,9 +154,29 @@ describe("analysis route", () => {
 
     expect(response.status).toBe(422);
     await expect(response.json()).resolves.toEqual({
-      error: { code: "STANCE_REQUIRED" },
+      error: ANALYSIS_REQUEST_ERRORS.STANCE_REQUIRED,
     });
     expect(scheduled).toHaveLength(0);
+  });
+
+  it("maps an internal prompt failure to a public unavailable error", async () => {
+    const { createQueuedAnalysis, handler } = setup();
+    createQueuedAnalysis.mockRejectedValue(
+      new QueuedAnalysisCreationError(
+        "PROMPT_UNAVAILABLE",
+        "internal prompt resolver details",
+      ),
+    );
+
+    const response = await handler(request());
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body).toEqual({
+      error: ANALYSIS_REQUEST_ERRORS.ANALYSIS_UNAVAILABLE,
+    });
+    expect(JSON.stringify(body)).not.toContain("PROMPT_UNAVAILABLE");
+    expect(JSON.stringify(body)).not.toContain("resolver details");
   });
 
   it("returns the daily limit and its reset time without creating work", async () => {
@@ -175,11 +198,38 @@ describe("analysis route", () => {
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "ANALYSIS_DAILY_LIMIT_REACHED",
+        message:
+          "本日の分析上限に達しました。リセット時刻以降にもう一度お試しください。",
+        action: "WAIT_FOR_RESET",
         limit: 10,
         resetAt: "2026-08-17T15:00:00.000Z",
       },
     });
     expect(scheduled).toHaveLength(0);
+  });
+
+  it("does not expose an unexpected AWS or database error", async () => {
+    const { createQueuedAnalysis, handler, reportUnexpectedError } = setup();
+    const failure = Object.assign(
+      new Error("connection failed: password=db-super-secret"),
+      {
+        body: { api_key: "tlk_super-secret" },
+      },
+    );
+    createQueuedAnalysis.mockRejectedValue(failure);
+
+    const response = await handler(request());
+    const serialized = JSON.stringify(await response.json());
+
+    expect(response.status).toBe(500);
+    expect(serialized).toBe(
+      JSON.stringify({
+        error: ANALYSIS_REQUEST_ERRORS.ANALYSIS_UNAVAILABLE,
+      }),
+    );
+    expect(serialized).not.toContain("db-super-secret");
+    expect(serialized).not.toContain("tlk_super-secret");
+    expect(reportUnexpectedError).toHaveBeenCalledWith(failure);
   });
 
   it("reports a rejected background task without leaving an unhandled promise", async () => {

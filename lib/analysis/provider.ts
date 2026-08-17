@@ -42,7 +42,7 @@ export interface VideoAnalysisProvider {
 const SENSITIVE_KEY_PATTERN =
   /authorization|cookie|credential|password|secret|signature|token|api[-_]?key/i;
 
-function redactSensitiveText(value: string): string {
+export function sanitizeVideoAnalysisErrorText(value: string): string {
   return value
     .replace(/\btlk_[A-Za-z0-9_-]+\b/g, "[REDACTED]")
     .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, "[REDACTED]")
@@ -61,7 +61,7 @@ function sanitizeDetailValue(
   value: unknown,
   seen: WeakSet<object>,
 ): unknown {
-  if (typeof value === "string") return redactSensitiveText(value);
+  if (typeof value === "string") return sanitizeVideoAnalysisErrorText(value);
   if (
     value === null ||
     typeof value === "number" ||
@@ -82,7 +82,7 @@ function sanitizeDetailValue(
   const sanitized: Record<string, unknown> = {};
   if (value instanceof Error) {
     sanitized.name = value.name;
-    sanitized.message = redactSensitiveText(value.message);
+    sanitized.message = sanitizeVideoAnalysisErrorText(value.message);
   }
 
   for (const [key, item] of Object.entries(source)) {
@@ -102,7 +102,7 @@ export function formatVideoAnalysisErrorDetails(cause: unknown): string {
   try {
     return JSON.stringify(sanitizeDetailValue(cause, new WeakSet()), null, 2);
   } catch {
-    return redactSensitiveText(String(cause));
+    return sanitizeVideoAnalysisErrorText(String(cause));
   }
 }
 
@@ -119,10 +119,11 @@ export class VideoAnalysisError extends Error {
     this.name = "VideoAnalysisError";
     this.code = code;
     this.details =
-      options?.details ??
-      (options?.cause === undefined
-        ? undefined
-        : formatVideoAnalysisErrorDetails(options.cause));
+      options?.details !== undefined
+        ? sanitizeVideoAnalysisErrorText(options.details)
+        : options?.cause === undefined
+          ? undefined
+          : formatVideoAnalysisErrorDetails(options.cause);
   }
 }
 

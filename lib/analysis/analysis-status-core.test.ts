@@ -54,7 +54,12 @@ describe("owned analysis status reader", () => {
     await expect(reader({ userId, analysisId })).resolves.toEqual({
       analysisId,
       status: "FAILED",
-      errorCode: STUCK_ANALYSIS_ERROR_CODE,
+      error: {
+        code: "ANALYSIS_RETRYABLE",
+        message:
+          "分析を完了できませんでした。少し時間をおいてから再分析してください。",
+        action: "RETRY_ANALYSIS",
+      },
     });
     expect(failOwnedStuckAnalysis).toHaveBeenCalledWith({
       userId,
@@ -79,7 +84,7 @@ describe("owned analysis status reader", () => {
     await expect(reader({ userId, analysisId })).resolves.toEqual({
       analysisId,
       status: "ANALYZING",
-      errorCode: null,
+      error: null,
     });
     expect(failOwnedStuckAnalysis).not.toHaveBeenCalled();
   });
@@ -111,7 +116,7 @@ describe("owned analysis status reader", () => {
     await expect(reader({ userId, analysisId })).resolves.toEqual({
       analysisId,
       status: "COMPLETED",
-      errorCode: null,
+      error: null,
     });
     expect(failOwnedStuckAnalysis).toHaveBeenCalledOnce();
     expect(findOwnedAnalysis).toHaveBeenCalledTimes(2);

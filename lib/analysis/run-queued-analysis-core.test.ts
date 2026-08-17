@@ -188,6 +188,27 @@ describe("run queued analysis", () => {
     expect(completeAnalysis).not.toHaveBeenCalled();
   });
 
+  it("redacts secrets from explicit provider details before persistence", async () => {
+    const providerError = new VideoAnalysisError(
+      "ANALYZE_FAILED",
+      "provider failed",
+      {
+        details:
+          "api_key=tlk_super-secret-value authorization: Bearer bearer-secret",
+      },
+    );
+    const { failAnalysis, runner } = setup({ analyzeError: providerError });
+
+    await expect(runner(analysisId)).resolves.toMatchObject({
+      outcome: "FAILED",
+      errorCode: "ANALYZE_FAILED",
+    });
+    const persistedMessage = failAnalysis.mock.calls[0]?.[0].errorMessage;
+    expect(persistedMessage).toContain("[REDACTED]");
+    expect(persistedMessage).not.toContain("tlk_super-secret-value");
+    expect(persistedMessage).not.toContain("bearer-secret");
+  });
+
   it("does not guess a stance or call the provider when stance is null", async () => {
     const { analyze, createProvider, failAnalysis, runner } = setup({
       context: { ...context, stance: null },

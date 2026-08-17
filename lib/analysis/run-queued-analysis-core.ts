@@ -1,5 +1,6 @@
 import {
   formatVideoAnalysisErrorDetails,
+  sanitizeVideoAnalysisErrorText,
   VideoAnalysisError,
   type CameraAngle,
   type Stance,
@@ -73,7 +74,9 @@ function asFailure(cause: unknown) {
   if (cause instanceof VideoAnalysisError) {
     return {
       errorCode: cause.code,
-      errorMessage: cause.details ?? cause.message,
+      errorMessage: sanitizeVideoAnalysisErrorText(
+        cause.details ?? cause.message,
+      ),
     };
   }
 
