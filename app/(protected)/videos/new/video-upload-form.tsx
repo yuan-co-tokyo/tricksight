@@ -55,7 +55,13 @@ type SelectedVideo = {
   durationSeconds: number | null;
 };
 
-type UploadStatus = "idle" | "preparing" | "uploading" | "success" | "error";
+type UploadStatus =
+  | "idle"
+  | "preparing"
+  | "uploading"
+  | "verifying"
+  | "success"
+  | "error";
 
 type PresignedUploadResponse = {
   url: string;
@@ -64,12 +70,27 @@ type PresignedUploadResponse = {
   videoId: string;
 };
 
+type UploadCompletionResponse = {
+  status: "UPLOADED" | "READY";
+  idempotent: boolean;
+};
+
 class UploadPreparationError extends Error {
   readonly status: number;
 
   constructor(status: number) {
     super("The upload could not be prepared.");
     this.name = "UploadPreparationError";
+    this.status = status;
+  }
+}
+
+class UploadCompletionRequestError extends Error {
+  readonly status: number;
+
+  constructor(status: number) {
+    super("The uploaded object could not be verified.");
+    this.name = "UploadCompletionRequestError";
     this.status = status;
   }
 }
@@ -114,6 +135,42 @@ async function requestPresignedUpload(input: unknown) {
   return body;
 }
 
+function isUploadCompletionResponse(
+  value: unknown,
+): value is UploadCompletionResponse {
+  if (!value || typeof value !== "object") return false;
+
+  const candidate = value as Partial<UploadCompletionResponse>;
+
+  return (
+    (candidate.status === "UPLOADED" || candidate.status === "READY") &&
+    typeof candidate.idempotent === "boolean"
+  );
+}
+
+async function notifyUploadComplete(input: {
+  sessionId: string;
+  videoId: string;
+}) {
+  const response = await fetch("/api/uploads/complete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new UploadCompletionRequestError(response.status);
+  }
+
+  const body: unknown = await response.json();
+
+  if (!isUploadCompletionResponse(body)) {
+    throw new UploadCompletionRequestError(502);
+  }
+
+  return body;
+}
+
 function formatMegabytes(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
@@ -129,6 +186,26 @@ function uploadErrorMessage(error: unknown) {
     }
 
     return "アップロードの準備に失敗しました。時間をおいて、もう一度お試しください。";
+  }
+
+  if (error instanceof UploadCompletionRequestError) {
+    if (error.status === 401) {
+      return "セッションの有効期限が切れました。もう一度ログインしてください。";
+    }
+
+    if (error.status === 404) {
+      return "アップロード情報を確認できませんでした。動画を選び直してください。";
+    }
+
+    if (error.status === 409) {
+      return "このアップロードは完了状態へ進められません。動画を選び直してください。";
+    }
+
+    if (error.status === 422) {
+      return "S3上の動画を検証できませんでした。動画の内容を確認して、選び直してください。";
+    }
+
+    return "アップロード後の確認に失敗しました。時間をおいて、もう一度お試しください。";
   }
 
   if (error instanceof DirectUploadError) {
@@ -161,7 +238,10 @@ export function VideoUploadForm({
     () => tricks.find((trick) => trick.id === trickId) ?? null,
     [trickId, tricks],
   );
-  const isBusy = uploadStatus === "preparing" || uploadStatus === "uploading";
+  const isBusy =
+    uploadStatus === "preparing" ||
+    uploadStatus === "uploading" ||
+    uploadStatus === "verifying";
   const isReadyToSubmit =
     selectedVideo?.durationSeconds !== null &&
     selectedVideo !== null &&
@@ -269,9 +349,17 @@ export function VideoUploadForm({
         onProgress: setUploadProgress,
       });
 
-      // TODO(T5-3): sessionId/videoIdを使い、アップロード完了通知APIを呼ぶ。
+      setUploadStatus("verifying");
+      await notifyUploadComplete({
+        sessionId: presignedUpload.sessionId,
+        videoId: presignedUpload.videoId,
+      });
+
+      // TODO(T6): UPLOADEDになった動画の分析ジョブを開始する。
       setUploadStatus("success");
-      setFeedback("アップロードが完了しました。分析の受付は次の工程で有効になります。");
+      setFeedback(
+        "アップロードと動画の確認が完了しました。分析の受付は次の工程で有効になります。",
+      );
     } catch (error) {
       setUploadStatus("error");
       setFeedback(uploadErrorMessage(error));
@@ -495,11 +583,14 @@ export function VideoUploadForm({
 
             {uploadStatus === "preparing" ||
             uploadStatus === "uploading" ||
+            uploadStatus === "verifying" ||
             uploadStatus === "success" ? (
               <Progress value={uploadProgress} aria-label="アップロード進捗">
                 <ProgressLabel>
                   {uploadStatus === "preparing"
                     ? "アップロードを準備しています"
+                    : uploadStatus === "verifying"
+                      ? "S3上の動画を確認しています"
                     : uploadStatus === "success"
                       ? "アップロード完了"
                       : "S3へアップロードしています"}
@@ -541,6 +632,8 @@ export function VideoUploadForm({
                 ? "準備しています…"
                 : uploadStatus === "uploading"
                   ? `アップロード中 ${uploadProgress}%`
+                  : uploadStatus === "verifying"
+                    ? "動画を確認しています…"
                   : uploadStatus === "success"
                     ? "アップロード完了"
                     : "S3へ動画をアップロード"}
