@@ -127,12 +127,27 @@ TwelveLabs は JSON Schema の numeric constraints を受け付けないため�
 
 T1-6-fix1 で `error_message` にAPIエラー本文を保存する対応を入れたが、`raw_response` は成功時のみ保存される作りになっている。検証失敗時こそ診断に必要なので、失敗時も保存すること（§15のとおりクライアントへは返さない）。
 
+#### B-3: 署名発行に失敗しても sessions / videos の行が残る（優先度: 中）
+
+本番環境（AWS環境変数が未設定）で `/api/uploads/presigned-post` を叩いたところ、`500 UPLOAD_INITIALIZATION_FAILED` を返しつつ、**`sessions` と `videos` の行が `PENDING_UPLOAD` で作成されたまま残った**。
+
+`presigned-post` は §7 のとおり「先に sessions / videos を作って s3Key を確定 → その後に署名を発行」という順序になっているが、**署名発行の失敗時に作成済みの行をロールバックしていない**。失敗するたびにゴミ行が増え、履歴一覧にも `PENDING_UPLOAD` として現れる。
+
+対応方針：署名発行までを含めて原子的に扱い、署名に失敗したら行を残さないこと。あるいは失敗時に明示的に削除すること。T4-2 の `createPendingUpload` は sessions と videos の作成をトランザクションにしているが、その外側にある署名発行の失敗が考慮されていない。
+
+### 本番環境の未設定項目
+
+Vercel Production に設定されているのは `DATABASE_URL` / `BETTER_AUTH_SECRET` / `BETTER_AUTH_URL` のみ。`S3_BUCKET_NAME` / `AWS_REGION` / AWS認証情報が無いため、**本番では動画アップロードが動作しない**（2026-08-18 に実機で確認）。
+
+ただし §5・§15 により本番へ静的アクセスキーを置くことはできないため、有効化には Vercel OIDC federation の実装が前提となる。順序は「OIDC実装 → B-1/B-2/B-3 修正 → 本番通し確認」とする。
+
 ### 未解決の課題
 
 | 課題 | 内容 |
 | --- | --- |
 | B-1 confidence範囲外 | 分析が毎回失敗する可能性。T7の前に修正必須 |
 | B-2 失敗時のraw_response | 診断ができない。B-1の調査にも必要 |
+| B-3 署名失敗時のゴミ行 | 失敗のたびに PENDING_UPLOAD の行が増える |
 | Vercel OIDC未実装 | `AWS_ROLE_ARN` / `AssumeRole` / `@vercel/functions` いずれも未実装。§5・§15により本番へ静的アクセスキーを置けないため、本番での分析実行の前提 |
 | 分析品質 | 成功・失敗の判定が2件中2件で誤り（上記）。H-1後に最優先で再評価 |
 | 評価動画 | H-1 未着手。失敗した試技を含むセットが必要 |
