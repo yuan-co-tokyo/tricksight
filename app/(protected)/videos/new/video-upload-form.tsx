@@ -37,6 +37,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import {
   AnalysisRequestError,
+  formatAnalysisResetAt,
   requestAnalysisStart,
   type AnalysisRequestErrorDetail,
 } from "@/lib/analysis/analysis-client";
@@ -108,14 +109,6 @@ class UploadCompletionRequestError extends Error {
 
 const fieldClassName =
   "h-10 w-full rounded-lg border border-input bg-input/30 px-3 text-base text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm";
-
-const resetAtFormatter = new Intl.DateTimeFormat("ja-JP", {
-  month: "long",
-  day: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  timeZone: "Asia/Tokyo",
-});
 
 const fallbackAnalysisStartError: AnalysisRequestErrorDetail = {
   code: "ANALYSIS_UNAVAILABLE",
@@ -259,10 +252,10 @@ function analysisStartErrorMessage(detail: AnalysisRequestErrorDetail) {
     return detail.message;
   }
 
-  const resetAt = new Date(detail.resetAt);
-  if (Number.isNaN(resetAt.getTime())) return detail.message;
+  const resetAt = formatAnalysisResetAt(detail.resetAt);
+  if (!resetAt) return detail.message;
 
-  return `${detail.message} ${resetAtFormatter.format(resetAt)}以降に再開できます。`;
+  return `${detail.message} ${resetAt}以降に再開できます。`;
 }
 
 export function VideoUploadForm({

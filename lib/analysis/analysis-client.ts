@@ -49,6 +49,14 @@ const fallbackError: AnalysisRequestErrorDetail = {
   action: "TRY_LATER",
 };
 
+const resetAtFormatter = new Intl.DateTimeFormat("ja-JP", {
+  month: "long",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: "Asia/Tokyo",
+});
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object";
 }
@@ -102,6 +110,13 @@ export class AnalysisRequestError extends Error {
     this.status = status;
     this.detail = detail;
   }
+}
+
+export function formatAnalysisResetAt(resetAt: string | undefined) {
+  if (!resetAt) return null;
+
+  const date = new Date(resetAt);
+  return Number.isNaN(date.getTime()) ? null : resetAtFormatter.format(date);
 }
 
 export async function requestAnalysisStart(

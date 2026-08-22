@@ -30,6 +30,7 @@ import {
   formatTimestampSeconds,
   getCompletedAnalysisResult,
 } from "@/lib/history-detail";
+import { publicAnalysisFailure } from "@/lib/analysis/analysis-public-error";
 import {
   isPlayableVideoStatus,
   type PlaybackVideoStatus,
@@ -38,6 +39,7 @@ import { createOwnedVideoPlaybackUrl } from "@/lib/uploads/video-playback-url";
 import { cn } from "@/lib/utils";
 
 import { AnalysisProgress } from "./analysis-progress";
+import { AnalysisFailureActions } from "./analysis-failure-actions";
 
 type HistoryDetailPageProps = {
   params: Promise<{ sessionId: string }>;
@@ -160,8 +162,10 @@ function StatusNotice({
 
 function AnalysisResult({
   analysis,
+  videoId,
 }: {
   analysis: HistoryDetail["latestAnalysis"];
+  videoId: string | null;
 }) {
   if (!analysis) {
     return (
@@ -184,14 +188,11 @@ function AnalysisResult({
 
   if (analysis.status === "FAILED") {
     return (
-      <>
-        <StatusNotice
-          title="分析に失敗しました"
-          description="分析結果を取得できませんでした。時間をおいてからもう一度お試しください。"
-          tone="error"
-        />
-        {/* TODO(T7-3): 公開エラーのactionに応じた再分析・撮り直し導線を追加する。 */}
-      </>
+      <AnalysisFailureActions
+        key={analysis.id}
+        videoId={videoId}
+        initialError={publicAnalysisFailure(analysis.errorCode)}
+      />
     );
   }
 
@@ -614,7 +615,10 @@ export default async function HistoryDetailPage({
           </div>
         </CardHeader>
         <CardContent>
-          <AnalysisResult analysis={session.latestAnalysis} />
+          <AnalysisResult
+            analysis={session.latestAnalysis}
+            videoId={session.video?.id ?? null}
+          />
         </CardContent>
       </Card>
 
