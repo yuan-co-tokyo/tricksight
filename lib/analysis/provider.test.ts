@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { formatVideoAnalysisErrorDetails } from "./provider";
+import {
+  formatVideoAnalysisErrorDetails,
+  sanitizeVideoAnalysisRawResponse,
+} from "./provider";
 
 describe("provider error detail sanitization", () => {
   it("redacts nested keys, API tokens, AWS keys, bearer tokens, and signed URLs", () => {
@@ -18,5 +21,27 @@ describe("provider error detail sanitization", () => {
     expect(details).not.toContain("bearer-super-secret");
     expect(details).not.toContain("AKIAABCDEFGHIJKLMNOP");
     expect(details).not.toContain("signature-secret");
+  });
+
+  it("keeps diagnostic text JSON-safe while redacting raw response secrets", () => {
+    const rawResponse = sanitizeVideoAnalysisRawResponse({
+      id: "analysis-123",
+      data: 'not-json api_key="tlk_raw-secret"',
+      authorization: "Bearer raw-bearer-secret",
+      usage: { outputTokens: 420 },
+      sessionToken: "aws-session-secret",
+      circular: undefined,
+    });
+
+    expect(rawResponse).toEqual({
+      id: "analysis-123",
+      data: 'not-json api_key="[REDACTED]"',
+      authorization: "[REDACTED]",
+      usage: { outputTokens: 420 },
+      sessionToken: "[REDACTED]",
+    });
+    expect(JSON.stringify(rawResponse)).not.toContain("tlk_raw-secret");
+    expect(JSON.stringify(rawResponse)).not.toContain("raw-bearer-secret");
+    expect(JSON.stringify(rawResponse)).not.toContain("aws-session-secret");
   });
 });

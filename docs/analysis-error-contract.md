@@ -4,7 +4,7 @@
 
 ## 情報境界
 
-- `analyses.raw_response` はプロバイダー応答の監査・デバッグ用であり、DBへの保存だけに使用する。API、履歴クエリ、Server Componentの表示データへ選択しない。
+- `analyses.raw_response` はプロバイダー応答の監査・デバッグ用であり、成功時と出力検証失敗時にDBへ保存する。API、履歴クエリ、Server Componentの表示データへ選択しない。
 - `analyses.error_message` はマスク済みの内部診断用であり、APIや履歴クエリへ選択しない。
 - `analyses.error_code` は内部原因の分類用に保存する。分析ステータスAPIではそのまま返さず、下記の公開コードへ変換する。
 - APIの予期しないAWS・TwelveLabs・DBエラーはサーバ側で記録し、クライアントには固定した公開エラーだけを返す。
@@ -50,7 +50,7 @@
 
 ## マスク規則
 
-`error_message`への保存前に、次を`[REDACTED]`へ置換する。
+`error_message`と`raw_response`への保存前に、次を`[REDACTED]`へ置換する。
 
 - `apiKey`, `authorization`, `cookie`, `credential`, `password`, `secret`, `signature`, `token`等の機密キー配下
 - TwelveLabsの`tlk_`トークン
@@ -59,4 +59,21 @@
 - `X-Amz-Credential`, `X-Amz-Security-Token`, `X-Amz-Signature`のクエリ値
 - エラーのstack（保存対象外）
 
-マスクは外部エラーの`cause`だけでなく、`VideoAnalysisError.details`が明示指定された場合にも適用する。
+マスクは外部エラーの`cause`だけでなく、`VideoAnalysisError.details`と`rawResponse`が明示指定された場合にも適用する。workerのDB保存直前にも同じマスクを通す。
+
+## 失敗時のraw response形式
+
+`SCHEMA_VALIDATION_FAILED`、`INVALID_JSON`、`OUTPUT_TRUNCATED`では次のJSON envelopeを`analyses.raw_response`へ保存する。
+
+```json
+{
+  "kind": "provider_failure",
+  "errorCode": "INVALID_JSON",
+  "response": {
+    "data": "パースできなかった生テキスト",
+    "finishReason": "stop"
+  }
+}
+```
+
+成功時のSDKレスポンスと形を分けることで、診断時に成功payloadと失敗payloadを誤認しない。JSONとして壊れたモデル出力も`response.data`の文字列として保持するため、jsonb列へ安全に保存しながら原文を確認できる。

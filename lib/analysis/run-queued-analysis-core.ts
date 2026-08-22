@@ -1,5 +1,6 @@
 import {
   formatVideoAnalysisErrorDetails,
+  sanitizeVideoAnalysisRawResponse,
   sanitizeVideoAnalysisErrorText,
   VideoAnalysisError,
   type CameraAngle,
@@ -30,6 +31,12 @@ export type ResolvedQueuedAnalysisPrompt = {
   version: string;
 };
 
+export type FailedAnalysisRawResponse = {
+  kind: "provider_failure";
+  errorCode: string;
+  response: unknown;
+};
+
 export interface QueuedAnalysisExecutionStore {
   claimQueuedAnalysis(input: {
     analysisId: string;
@@ -49,6 +56,7 @@ export interface QueuedAnalysisExecutionStore {
     analysisId: string;
     errorCode: string;
     errorMessage: string;
+    rawResponse: FailedAnalysisRawResponse | null;
     completedAt: Date;
   }): Promise<boolean>;
 }
@@ -70,19 +78,34 @@ export type RunQueuedAnalysisResult =
       errorCode: string;
     };
 
-function asFailure(cause: unknown) {
+type AnalysisFailure = {
+  errorCode: string;
+  errorMessage: string;
+  rawResponse: FailedAnalysisRawResponse | null;
+};
+
+function asFailure(cause: unknown): AnalysisFailure {
   if (cause instanceof VideoAnalysisError) {
     return {
       errorCode: cause.code,
       errorMessage: sanitizeVideoAnalysisErrorText(
         cause.details ?? cause.message,
       ),
+      rawResponse:
+        cause.rawResponse === undefined
+          ? null
+          : {
+              kind: "provider_failure",
+              errorCode: cause.code,
+              response: sanitizeVideoAnalysisRawResponse(cause.rawResponse),
+            },
     };
   }
 
   return {
     errorCode: "ANALYSIS_FAILED",
     errorMessage: formatVideoAnalysisErrorDetails(cause),
+    rawResponse: null,
   };
 }
 
@@ -176,13 +199,14 @@ export function createRunQueuedAnalysis(
         throw new VideoAnalysisError(
           "PROMPT_VERSION_MISMATCH",
           "AIプロバイダーが使用したプロンプトバージョンがキューの記録と一致しません。",
+          { rawResponse: output.rawResponse },
         );
       }
 
       const completed = await dependencies.store.completeAnalysis({
         analysisId,
         resultJson: output.result,
-        rawResponse: output.rawResponse,
+        rawResponse: sanitizeVideoAnalysisRawResponse(output.rawResponse),
         promptVersion: output.promptVersion,
         completedAt: dependencies.now(),
       });

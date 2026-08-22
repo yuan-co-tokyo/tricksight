@@ -106,6 +106,7 @@ const queuedAnalysisExecutionStore: QueuedAnalysisExecutionStore = {
         status: "FAILED",
         errorCode: input.errorCode,
         errorMessage: input.errorMessage,
+        rawResponse: input.rawResponse,
         completedAt: input.completedAt,
       })
       .where(

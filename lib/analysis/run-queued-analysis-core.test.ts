@@ -54,6 +54,7 @@ function setup(options: {
   claimed?: ClaimedAnalysis | null;
   context?: QueuedAnalysisExecutionContext | null;
   analyzeError?: unknown;
+  outputRawResponse?: unknown;
   outputPromptVersion?: string;
 } = {}) {
   const claimQueuedAnalysis = vi.fn().mockResolvedValue(
@@ -74,7 +75,9 @@ function setup(options: {
     if (options.analyzeError !== undefined) throw options.analyzeError;
     return {
       result: analysisResult,
-      rawResponse: { providerPayload: "db-only" },
+      rawResponse: options.outputRawResponse ?? {
+        providerPayload: "db-only",
+      },
       promptVersion:
         options.outputPromptVersion ??
         "common-system-v2+kickflip-v1",
@@ -134,6 +137,27 @@ describe("run queued analysis", () => {
     expect(failAnalysis).not.toHaveBeenCalled();
   });
 
+  it("redacts secrets from a successful raw response before persistence", async () => {
+    const { completeAnalysis, runner } = setup({
+      outputRawResponse: {
+        data: "valid output",
+        api_key: "tlk_success-secret",
+      },
+    });
+
+    await expect(runner(analysisId)).resolves.toMatchObject({
+      outcome: "COMPLETED",
+    });
+    expect(completeAnalysis).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawResponse: {
+          data: "valid output",
+          api_key: "[REDACTED]",
+        },
+      }),
+    );
+  });
+
   it("records the structured and raw response after a successful analysis", async () => {
     const { analyze, claimQueuedAnalysis, completeAnalysis, failAnalysis, runner } =
       setup();
@@ -183,6 +207,7 @@ describe("run queued analysis", () => {
       analysisId,
       errorCode: "PROVIDER_FAILED",
       errorMessage: "sanitized provider details",
+      rawResponse: null,
       completedAt,
     });
     expect(completeAnalysis).not.toHaveBeenCalled();
@@ -195,6 +220,10 @@ describe("run queued analysis", () => {
       {
         details:
           "api_key=tlk_super-secret-value authorization: Bearer bearer-secret",
+        rawResponse: {
+          data: 'not-json api_key="tlk_raw-secret-value"',
+          authorization: "Bearer raw-bearer-secret",
+        },
       },
     );
     const { failAnalysis, runner } = setup({ analyzeError: providerError });
@@ -207,6 +236,59 @@ describe("run queued analysis", () => {
     expect(persistedMessage).toContain("[REDACTED]");
     expect(persistedMessage).not.toContain("tlk_super-secret-value");
     expect(persistedMessage).not.toContain("bearer-secret");
+    const persistedRawResponse =
+      failAnalysis.mock.calls[0]?.[0].rawResponse;
+    expect(persistedRawResponse).toEqual({
+      kind: "provider_failure",
+      errorCode: "ANALYZE_FAILED",
+      response: {
+        data: 'not-json api_key="[REDACTED]"',
+        authorization: "[REDACTED]",
+      },
+    });
+    expect(JSON.stringify(persistedRawResponse)).not.toContain(
+      "tlk_raw-secret-value",
+    );
+    expect(JSON.stringify(persistedRawResponse)).not.toContain(
+      "raw-bearer-secret",
+    );
+  });
+
+  it.each([
+    "SCHEMA_VALIDATION_FAILED",
+    "INVALID_JSON",
+    "OUTPUT_TRUNCATED",
+  ])("persists a diagnostic raw response for %s", async (errorCode) => {
+    const rawResponse = {
+      id: "analysis-from-provider",
+      data:
+        errorCode === "SCHEMA_VALIDATION_FAILED"
+          ? '{"result":{"confidence":90}}'
+          : '{"summary":"途中',
+      finishReason:
+        errorCode === "OUTPUT_TRUNCATED" ? "length" : "stop",
+    };
+    const { failAnalysis, runner } = setup({
+      analyzeError: new VideoAnalysisError(errorCode, "provider output failed", {
+        rawResponse,
+      }),
+    });
+
+    await expect(runner(analysisId)).resolves.toMatchObject({
+      outcome: "FAILED",
+      errorCode,
+    });
+    expect(failAnalysis).toHaveBeenCalledWith({
+      analysisId,
+      errorCode,
+      errorMessage: "provider output failed",
+      rawResponse: {
+        kind: "provider_failure",
+        errorCode,
+        response: rawResponse,
+      },
+      completedAt,
+    });
   });
 
   it("does not guess a stance or call the provider when stance is null", async () => {
@@ -225,6 +307,7 @@ describe("run queued analysis", () => {
       analysisId,
       errorCode: "STANCE_REQUIRED",
       errorMessage: "分析前にプロフィールでスタンスを設定してください。",
+      rawResponse: null,
       completedAt,
     });
   });

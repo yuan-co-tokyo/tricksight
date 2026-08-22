@@ -127,6 +127,8 @@ TwelveLabs は JSON Schema の numeric constraints を受け付けないため�
 
 T1-6-fix1 で `error_message` にAPIエラー本文を保存する対応を入れたが、`raw_response` は成功時のみ保存される作りになっている。検証失敗時こそ診断に必要なので、失敗時も保存すること（§15のとおりクライアントへは返さない）。
 
+**修正済み。** `SCHEMA_VALIDATION_FAILED` / `INVALID_JSON` / `OUTPUT_TRUNCATED`では、マスク済みのプロバイダー応答を`provider_failure` envelopeとして保存する。パース不能・切り詰められた本文はjsonb内の文字列フィールドとして保持し、APIと履歴クエリからは引き続き除外する。
+
 #### B-3: 署名発行に失敗しても sessions / videos の行が残る（優先度: 中）
 
 本番環境（AWS環境変数が未設定）で `/api/uploads/presigned-post` を叩いたところ、`500 UPLOAD_INITIALIZATION_FAILED` を返しつつ、**`sessions` と `videos` の行が `PENDING_UPLOAD` で作成されたまま残った**。
@@ -188,7 +190,7 @@ ollie-007 (失敗)  85/80/85/80/85   ← 成功と完全に同一
 | --- | --- |
 | **分析品質** | **失敗検出が0/7。プロダクトの成立性に直結。スロー撮影の失敗動画で交絡を解くのが次の一手** |
 | B-1 confidence範囲外 | **修正済み。** confidenceの0〜1尺度を`common-system-v2`に明記し、14本すべてschema通過 |
-| B-2 失敗時のraw_response | 診断ができない |
+| B-2 失敗時のraw_response | **修正済み。** 出力検証失敗時もマスク済み診断envelopeを保存し、クライアントには非公開 |
 | B-3 署名失敗時のゴミ行 | 失敗のたびに PENDING_UPLOAD の行が増える |
 | Vercel OIDC未実装 | `AWS_ROLE_ARN` / `AssumeRole` / `@vercel/functions` いずれも未実装。§5・§15により本番へ静的アクセスキーを置けないため、本番での分析実行の前提 |
 | 分析品質 | 成功・失敗の判定が2件中2件で誤り（上記）。H-1後に最優先で再評価 |

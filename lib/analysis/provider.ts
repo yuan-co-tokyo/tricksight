@@ -40,7 +40,7 @@ export interface VideoAnalysisProvider {
 }
 
 const SENSITIVE_KEY_PATTERN =
-  /authorization|cookie|credential|password|secret|signature|token|api[-_]?key/i;
+  /authorization|cookie|credential|password|secret|signature|api[-_]?key|access[-_]?key|(?:auth|id|session|access|refresh|security)[-_]?token|^token$/i;
 
 export function sanitizeVideoAnalysisErrorText(value: string): string {
   return value
@@ -98,6 +98,19 @@ function sanitizeDetailValue(
   return sanitized;
 }
 
+export function sanitizeVideoAnalysisRawResponse(value: unknown): unknown {
+  const sanitized = sanitizeDetailValue(value, new WeakSet());
+
+  if (sanitized === undefined) return null;
+
+  try {
+    // jsonbへ渡せる値だけに正規化し、undefined等を境界で除去する。
+    return JSON.parse(JSON.stringify(sanitized));
+  } catch {
+    return sanitizeVideoAnalysisErrorText(String(value));
+  }
+}
+
 export function formatVideoAnalysisErrorDetails(cause: unknown): string {
   try {
     return JSON.stringify(sanitizeDetailValue(cause, new WeakSet()), null, 2);
@@ -109,11 +122,12 @@ export function formatVideoAnalysisErrorDetails(cause: unknown): string {
 export class VideoAnalysisError extends Error {
   readonly code: string;
   readonly details?: string;
+  readonly rawResponse?: unknown;
 
   constructor(
     code: string,
     message: string,
-    options?: ErrorOptions & { details?: string },
+    options?: ErrorOptions & { details?: string; rawResponse?: unknown },
   ) {
     super(message, options);
     this.name = "VideoAnalysisError";
@@ -124,6 +138,10 @@ export class VideoAnalysisError extends Error {
         : options?.cause === undefined
           ? undefined
           : formatVideoAnalysisErrorDetails(options.cause);
+    this.rawResponse =
+      options?.rawResponse === undefined
+        ? undefined
+        : sanitizeVideoAnalysisRawResponse(options.rawResponse);
   }
 }
 

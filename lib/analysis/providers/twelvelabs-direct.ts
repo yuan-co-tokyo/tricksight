@@ -184,16 +184,17 @@ export class TwelveLabsDirectVideoAnalyzer implements VideoAnalysisProvider {
       throw new VideoAnalysisError(
         "OUTPUT_TRUNCATED",
         `TwelveLabsの分析出力が正常完了しませんでした: finishReason=${rawResponse.finishReason ?? "undefined"}`,
+        { rawResponse },
       );
     }
-    const parsed = this.parseResponse(rawResponse.data);
+    const parsed = this.parseResponse(rawResponse.data, rawResponse);
     const validated = skateAnalysisResultSchema.safeParse(parsed);
 
     if (!validated.success) {
       throw new VideoAnalysisError(
         "SCHEMA_VALIDATION_FAILED",
         `分析結果が期待するスキーマに一致しません: ${validated.error.message}`,
-        { cause: validated.error },
+        { cause: validated.error, rawResponse },
       );
     }
 
@@ -321,14 +322,17 @@ export class TwelveLabsDirectVideoAnalyzer implements VideoAnalysisProvider {
     }
   }
 
-  private parseResponse(data: string | undefined): unknown {
+  private parseResponse(
+    data: string | undefined,
+    rawResponse: unknown,
+  ): unknown {
     try {
       return JSON.parse(data ?? "");
     } catch (cause) {
       throw new VideoAnalysisError(
         "INVALID_JSON",
         "TwelveLabsの分析結果が有効なJSONではありません。",
-        { cause },
+        { cause, rawResponse },
       );
     }
   }

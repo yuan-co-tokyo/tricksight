@@ -162,44 +162,59 @@ describe("TwelveLabsDirectVideoAnalyzer", () => {
   });
 
   it("分析レスポンスが不正なJSONならINVALID_JSONを返す", async () => {
-    mocks.analyze.mockResolvedValue({
+    const rawResponse = {
       id: "analysis-123",
       data: "not-json",
       finishReason: "stop",
-    });
+    };
+    mocks.analyze.mockResolvedValue(rawResponse);
     const provider = createProvider();
 
-    await expect(provider.analyze(defaultInput)).rejects.toMatchObject({
-      code: "INVALID_JSON",
-    });
+    await expect(provider.analyze(defaultInput)).rejects.toMatchObject(
+      {
+        code: "INVALID_JSON",
+        rawResponse,
+      },
+    );
   });
 
   it("JSONが結果schemaに違反すればSCHEMA_VALIDATION_FAILEDを返す", async () => {
-    mocks.analyze.mockResolvedValue({
+    const rawResponse = {
       id: "analysis-123",
-      data: JSON.stringify({ ...validResult, scores: { setup: 101 } }),
+      data: JSON.stringify({
+        ...validResult,
+        result: { outcome: "LANDED", confidence: 90 },
+      }),
       finishReason: "stop",
-    });
+    };
+    mocks.analyze.mockResolvedValue(rawResponse);
     const provider = createProvider();
 
-    await expect(provider.analyze(defaultInput)).rejects.toMatchObject({
-      code: "SCHEMA_VALIDATION_FAILED",
-    });
+    await expect(provider.analyze(defaultInput)).rejects.toMatchObject(
+      {
+        code: "SCHEMA_VALIDATION_FAILED",
+        rawResponse,
+      },
+    );
   });
 
   it("出力がlengthで打ち切られたらOUTPUT_TRUNCATEDを返す", async () => {
-    mocks.analyze.mockResolvedValue({
+    const rawResponse = {
       id: "analysis-123",
       data: '{"summary":"途中',
       finishReason: "length",
       error: { message: "maximum output length reached" },
-    });
+    };
+    mocks.analyze.mockResolvedValue(rawResponse);
     const provider = createProvider();
 
-    await expect(provider.analyze(defaultInput)).rejects.toMatchObject({
-      code: "OUTPUT_TRUNCATED",
-      message: expect.stringContaining("finishReason=length"),
-    });
+    await expect(provider.analyze(defaultInput)).rejects.toMatchObject(
+      {
+        code: "OUTPUT_TRUNCATED",
+        message: expect.stringContaining("finishReason=length"),
+        rawResponse,
+      },
+    );
   });
 
   it("APIエラーのstatusとbodyを秘密値を除いてdetailsへ保持する", async () => {
