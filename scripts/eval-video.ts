@@ -17,7 +17,7 @@ import {
   appendVideoContext,
   getPromptForTrick,
   type SupportedTrickSlug,
-} from "../prompts/common-system-v1";
+} from "../prompts/common-system-v2";
 
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 // Nova 2 Lite is invoked through a Bedrock inference profile.  The bare

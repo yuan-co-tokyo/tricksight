@@ -13,7 +13,7 @@ import {
   user,
   videos,
 } from "@/lib/db/schema";
-import { getPromptForTrick } from "@/prompts/common-system-v1";
+import { getPromptForTrick } from "@/prompts/common-system-v2";
 
 import {
   createQueuedAnalysisCreator,

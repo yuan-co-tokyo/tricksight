@@ -17,7 +17,7 @@ const claimedAnalysis = {
   id: analysisId,
   provider: "twelvelabs",
   modelId: "pegasus1.5",
-  promptVersion: "common-system-v1+kickflip-v1",
+  promptVersion: "common-system-v2+kickflip-v1",
 } satisfies ClaimedAnalysis;
 
 const context = {
@@ -77,7 +77,7 @@ function setup(options: {
       rawResponse: { providerPayload: "db-only" },
       promptVersion:
         options.outputPromptVersion ??
-        "common-system-v1+kickflip-v1",
+        "common-system-v2+kickflip-v1",
     };
   });
   const provider: VideoAnalysisProvider = {
@@ -92,8 +92,8 @@ function setup(options: {
     createProvider,
     resolvePrompt: vi.fn(() => ({
       trick: "kickflip" as const,
-      family: "v1",
-      version: "common-system-v1+kickflip-v1",
+      family: "v2",
+      version: "common-system-v2+kickflip-v1",
     })),
     createVideoS3Uri: vi.fn(
       (s3Key) => `s3://private-bucket/${s3Key}`,
@@ -152,13 +152,13 @@ describe("run queued analysis", () => {
       trick: "kickflip",
       stance: "REGULAR",
       cameraAngle: "SIDE",
-      promptVersion: "v1",
+      promptVersion: "v2",
     });
     expect(completeAnalysis).toHaveBeenCalledWith({
       analysisId,
       resultJson: analysisResult,
       rawResponse: { providerPayload: "db-only" },
-      promptVersion: "common-system-v1+kickflip-v1",
+      promptVersion: "common-system-v2+kickflip-v1",
       completedAt,
     });
     expect(failAnalysis).not.toHaveBeenCalled();

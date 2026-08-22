@@ -25,7 +25,7 @@ function setup() {
       videoId,
       provider: "twelvelabs",
       modelId: "pegasus1.5",
-      promptVersion: "common-system-v1+kickflip-v1",
+      promptVersion: "common-system-v2+kickflip-v1",
       status: "QUEUED",
     },
   });
@@ -79,7 +79,7 @@ describe("analysis route", () => {
         videoId,
         provider: "twelvelabs",
         modelId: "pegasus1.5",
-        promptVersion: "common-system-v1+kickflip-v1",
+        promptVersion: "common-system-v2+kickflip-v1",
         status: "ANALYZING",
       },
     });
@@ -103,7 +103,7 @@ describe("analysis route", () => {
         videoId,
         provider: "twelvelabs",
         modelId: "pegasus1.5",
-        promptVersion: "common-system-v1+kickflip-v1",
+        promptVersion: "common-system-v2+kickflip-v1",
         status: "QUEUED",
       },
     });

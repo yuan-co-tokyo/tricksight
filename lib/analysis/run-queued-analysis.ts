@@ -15,7 +15,7 @@ import {
   getPromptForTrick,
   isSupportedTrickSlug,
   promptVersionFamily,
-} from "@/prompts/common-system-v1";
+} from "@/prompts/common-system-v2";
 
 import { createVideoAnalysisProvider } from "./provider-factory";
 import {

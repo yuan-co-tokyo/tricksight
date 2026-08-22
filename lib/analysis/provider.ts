@@ -1,5 +1,5 @@
 import type { cameraAngleEnum } from "@/lib/db/schema/app";
-import type { SupportedTrickSlug } from "@/prompts/common-system-v1";
+import type { SupportedTrickSlug } from "@/prompts/common-system-v2";
 
 import type { SkateAnalysisResult } from "./schema";
 
@@ -7,7 +7,7 @@ export type CameraAngle = (typeof cameraAngleEnum.enumValues)[number];
 
 export type Stance = "REGULAR" | "GOOFY";
 
-export type PromptVersionFamily = "v1";
+export type PromptVersionFamily = "v2";
 
 export type VideoAnalysisInput = {
   videoS3Uri: string;
@@ -16,7 +16,7 @@ export type VideoAnalysisInput = {
   cameraAngle: CameraAngle;
   /**
    * 利用するプロンプトのバージョン系統を指定する値。
-   * 現在は "v1" だけを有効とし、実装はそれ以外を明確に拒否する。
+   * 現在は "v2" だけを有効とし、実装はそれ以外を明確に拒否する。
    */
   promptVersion: string;
 };
@@ -35,7 +35,7 @@ export type VideoAnalysisOutput = {
 export interface VideoAnalysisProvider {
   readonly providerName: string;
   readonly modelId: string;
-  /** promptVersionが"v1"以外の場合はUnsupportedPromptVersionErrorを投げる。 */
+  /** promptVersionが"v2"以外の場合はUnsupportedPromptVersionErrorを投げる。 */
   analyze(input: VideoAnalysisInput): Promise<VideoAnalysisOutput>;
 }
 

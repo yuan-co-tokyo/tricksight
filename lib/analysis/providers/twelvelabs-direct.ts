@@ -6,7 +6,7 @@ import {
   appendVideoContext,
   getPromptForTrick,
   promptVersionFamily,
-} from "../../../prompts/common-system-v1";
+} from "../../../prompts/common-system-v2";
 
 import {
   UnsupportedPromptVersionError,

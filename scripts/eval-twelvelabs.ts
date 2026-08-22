@@ -201,7 +201,7 @@ async function main() {
         trick: trickSlug(sample.trick),
         stance: sample.stance,
         cameraAngle: sample.cameraAngle,
-        promptVersion: "v1",
+        promptVersion: "v2",
       });
       const { finishReason, usage, rawText } = rawResponseDetails(
         output.rawResponse,

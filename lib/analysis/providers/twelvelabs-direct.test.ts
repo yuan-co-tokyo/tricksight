@@ -98,7 +98,7 @@ const defaultInput: VideoAnalysisInput = {
   trick: "ollie",
   stance: "REGULAR",
   cameraAngle: "SIDE",
-  promptVersion: "v1",
+  promptVersion: "v2",
 };
 
 function createProvider(overrides: Partial<TwelveLabsDirectConfig> = {}) {
@@ -139,11 +139,11 @@ describe("TwelveLabsDirectVideoAnalyzer", () => {
     expect(config.maxTokens).toBe(2_000);
   });
 
-  it("v1以外のpromptVersionをAPI呼び出し前に拒否する", async () => {
+  it("v2以外のpromptVersionをAPI呼び出し前に拒否する", async () => {
     const provider = createProvider();
 
     await expect(
-      provider.analyze({ ...defaultInput, promptVersion: "v2" }),
+      provider.analyze({ ...defaultInput, promptVersion: "v1" }),
     ).rejects.toBeInstanceOf(UnsupportedPromptVersionError);
     expect(mocks.getSignedUrl).not.toHaveBeenCalled();
     expect(mocks.assetCreate).not.toHaveBeenCalled();
@@ -259,7 +259,7 @@ describe("TwelveLabsDirectVideoAnalyzer", () => {
     expect(output).toEqual({
       result: validResult,
       rawResponse,
-      promptVersion: "common-system-v1+ollie-v1",
+      promptVersion: "common-system-v2+ollie-v1",
     });
     expect(mocks.getObjectCommand).toHaveBeenCalledWith({
       Bucket: "tricksight-videos",

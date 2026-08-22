@@ -32,7 +32,7 @@ const insertedAnalysis = {
   videoId: ids.video,
   provider: "provider-from-instance",
   modelId: "model-from-instance",
-  promptVersion: "common-system-v1+kickflip-v1",
+  promptVersion: "common-system-v2+kickflip-v1",
   status: "QUEUED",
 } satisfies InProgressAnalysis;
 
@@ -113,7 +113,7 @@ function setup(options: Parameters<typeof createMockStore>[0] = {}) {
     modelId: "model-from-instance",
   }));
   const resolvePromptVersion = vi.fn(
-    () => "common-system-v1+kickflip-v1",
+    () => "common-system-v2+kickflip-v1",
   );
   const creator = createQueuedAnalysisCreator({
     resolveCurrentUser,
@@ -155,7 +155,7 @@ describe("createQueuedAnalysisCreator", () => {
           videoId: ids.video,
           provider: "provider-from-instance",
           modelId: "model-from-instance",
-          promptVersion: "common-system-v1+kickflip-v1",
+          promptVersion: "common-system-v2+kickflip-v1",
           status: "QUEUED",
         },
       ]);
