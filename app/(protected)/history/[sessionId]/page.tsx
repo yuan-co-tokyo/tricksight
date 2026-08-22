@@ -37,6 +37,8 @@ import {
 import { createOwnedVideoPlaybackUrl } from "@/lib/uploads/video-playback-url";
 import { cn } from "@/lib/utils";
 
+import { AnalysisProgress } from "./analysis-progress";
+
 type HistoryDetailPageProps = {
   params: Promise<{ sessionId: string }>;
 };
@@ -170,22 +172,12 @@ function AnalysisResult({
     );
   }
 
-  if (analysis.status === "QUEUED") {
+  if (analysis.status === "QUEUED" || analysis.status === "ANALYZING") {
     return (
-      <StatusNotice
-        title="分析の開始を待っています"
-        description="順番に処理しています。分析結果が届くまでしばらくお待ちください。"
-        tone="primary"
-      />
-    );
-  }
-
-  if (analysis.status === "ANALYZING") {
-    return (
-      <StatusNotice
-        title="AIが動画を分析しています"
-        description="動きとフォームを確認しています。完了後に5項目のスコアと改善点が表示されます。"
-        tone="primary"
+      <AnalysisProgress
+        key={analysis.id}
+        analysisId={analysis.id}
+        initialStatus={analysis.status}
       />
     );
   }

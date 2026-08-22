@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   type ChangeEvent,
   type FormEvent,
@@ -14,10 +16,11 @@ import {
   InfoIcon,
   TriangleAlertIcon,
   UploadCloudIcon,
+  UserRoundCogIcon,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -33,6 +36,11 @@ import {
 } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  AnalysisRequestError,
+  requestAnalysisStart,
+  type AnalysisRequestErrorDetail,
+} from "@/lib/analysis/analysis-client";
+import {
   DirectUploadError,
   uploadVideoDirectlyToS3,
 } from "@/lib/uploads/browser-direct-upload";
@@ -41,6 +49,7 @@ import {
   validateVideoFileBasics,
 } from "@/lib/uploads/client-video-validation";
 import type { AllowedVideoContentType } from "@/lib/uploads/video-constraints";
+import { cn } from "@/lib/utils";
 
 type TrickOption = {
   id: string;
@@ -60,7 +69,9 @@ type UploadStatus =
   | "preparing"
   | "uploading"
   | "verifying"
+  | "starting-analysis"
   | "success"
+  | "analysis-error"
   | "error";
 
 type PresignedUploadResponse = {
@@ -97,6 +108,21 @@ class UploadCompletionRequestError extends Error {
 
 const fieldClassName =
   "h-10 w-full rounded-lg border border-input bg-input/30 px-3 text-base text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm";
+
+const resetAtFormatter = new Intl.DateTimeFormat("ja-JP", {
+  month: "long",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: "Asia/Tokyo",
+});
+
+const fallbackAnalysisStartError: AnalysisRequestErrorDetail = {
+  code: "ANALYSIS_UNAVAILABLE",
+  message:
+    "現在、分析を利用できません。時間をおいてからもう一度お試しください。",
+  action: "TRY_LATER",
+};
 
 function isPresignedUploadResponse(
   value: unknown,
@@ -219,6 +245,26 @@ function uploadErrorMessage(error: unknown) {
   return "動画をアップロードできませんでした。時間をおいて、もう一度お試しください。";
 }
 
+function analysisStartErrorDetail(error: unknown) {
+  return error instanceof AnalysisRequestError
+    ? error.detail
+    : fallbackAnalysisStartError;
+}
+
+function analysisStartErrorMessage(detail: AnalysisRequestErrorDetail) {
+  if (
+    detail.code !== "ANALYSIS_DAILY_LIMIT_REACHED" ||
+    !detail.resetAt
+  ) {
+    return detail.message;
+  }
+
+  const resetAt = new Date(detail.resetAt);
+  if (Number.isNaN(resetAt.getTime())) return detail.message;
+
+  return `${detail.message} ${resetAtFormatter.format(resetAt)}以降に再開できます。`;
+}
+
 export function VideoUploadForm({
   tricks,
   defaultPracticeDate,
@@ -226,6 +272,7 @@ export function VideoUploadForm({
   tricks: TrickOption[];
   defaultPracticeDate: string;
 }) {
+  const router = useRouter();
   const [trickId, setTrickId] = useState(tricks[0]?.id ?? "");
   const [selectedVideo, setSelectedVideo] = useState<SelectedVideo | null>(
     null,
@@ -234,6 +281,11 @@ export function VideoUploadForm({
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>("idle");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [analysisError, setAnalysisError] =
+    useState<AnalysisRequestErrorDetail | null>(null);
+  const [uploadedSessionId, setUploadedSessionId] = useState<string | null>(
+    null,
+  );
   const selectedTrick = useMemo(
     () => tricks.find((trick) => trick.id === trickId) ?? null,
     [trickId, tricks],
@@ -241,14 +293,19 @@ export function VideoUploadForm({
   const isBusy =
     uploadStatus === "preparing" ||
     uploadStatus === "uploading" ||
-    uploadStatus === "verifying";
+    uploadStatus === "verifying" ||
+    uploadStatus === "starting-analysis";
+  const hasCompletedUpload =
+    uploadStatus === "starting-analysis" ||
+    uploadStatus === "success" ||
+    uploadStatus === "analysis-error";
   const isReadyToSubmit =
     selectedVideo?.durationSeconds !== null &&
     selectedVideo !== null &&
     !videoError &&
     trickId !== "" &&
     !isBusy &&
-    uploadStatus !== "success";
+    !hasCompletedUpload;
 
   useEffect(() => {
     const previewUrl = selectedVideo?.previewUrl;
@@ -262,6 +319,8 @@ export function VideoUploadForm({
     setUploadStatus("idle");
     setUploadProgress(0);
     setFeedback(null);
+    setAnalysisError(null);
+    setUploadedSessionId(null);
   }
 
   function handleVideoChange(event: ChangeEvent<HTMLInputElement>) {
@@ -335,6 +394,8 @@ export function VideoUploadForm({
     };
 
     setFeedback(null);
+    setAnalysisError(null);
+    setUploadedSessionId(null);
     setUploadProgress(0);
     setUploadStatus("preparing");
 
@@ -355,11 +416,23 @@ export function VideoUploadForm({
         videoId: presignedUpload.videoId,
       });
 
-      // TODO(T6): UPLOADEDになった動画の分析ジョブを開始する。
-      setUploadStatus("success");
-      setFeedback(
-        "アップロードと動画の確認が完了しました。分析の受付は次の工程で有効になります。",
-      );
+      setUploadedSessionId(presignedUpload.sessionId);
+      setUploadProgress(100);
+      setUploadStatus("starting-analysis");
+
+      try {
+        await requestAnalysisStart(presignedUpload.videoId);
+        setUploadStatus("success");
+        setFeedback(
+          "アップロードが完了し、AI分析を開始しました。分析中の画面へ移動します。",
+        );
+        router.push(`/history/${encodeURIComponent(presignedUpload.sessionId)}`);
+      } catch (error) {
+        const detail = analysisStartErrorDetail(error);
+        setAnalysisError(detail);
+        setUploadStatus("analysis-error");
+        setFeedback(analysisStartErrorMessage(detail));
+      }
     } catch (error) {
       setUploadStatus("error");
       setFeedback(uploadErrorMessage(error));
@@ -409,7 +482,7 @@ export function VideoUploadForm({
             onSubmit={handleSubmit}
             aria-busy={isBusy}
           >
-            <fieldset className="grid gap-5" disabled={isBusy || uploadStatus === "success"}>
+            <fieldset className="grid gap-5" disabled={isBusy || hasCompletedUpload}>
               <legend className="mb-4 text-base font-semibold">練習情報</legend>
 
               <div className="grid gap-2">
@@ -501,7 +574,7 @@ export function VideoUploadForm({
               </div>
             </fieldset>
 
-            <fieldset className="grid min-w-0 gap-4" disabled={isBusy || uploadStatus === "success"}>
+            <fieldset className="grid min-w-0 gap-4" disabled={isBusy || hasCompletedUpload}>
               <legend className="mb-4 text-base font-semibold">動画</legend>
               <div className="grid gap-2">
                 <Label htmlFor="video">動画ファイル</Label>
@@ -584,6 +657,8 @@ export function VideoUploadForm({
             {uploadStatus === "preparing" ||
             uploadStatus === "uploading" ||
             uploadStatus === "verifying" ||
+            uploadStatus === "starting-analysis" ||
+            uploadStatus === "analysis-error" ||
             uploadStatus === "success" ? (
               <Progress value={uploadProgress} aria-label="アップロード進捗">
                 <ProgressLabel>
@@ -591,7 +666,7 @@ export function VideoUploadForm({
                     ? "アップロードを準備しています"
                     : uploadStatus === "verifying"
                       ? "S3上の動画を確認しています"
-                    : uploadStatus === "success"
+                    : hasCompletedUpload
                       ? "アップロード完了"
                       : "S3へアップロードしています"}
                 </ProgressLabel>
@@ -603,10 +678,14 @@ export function VideoUploadForm({
 
             {feedback ? (
               <p
-                role={uploadStatus === "error" ? "alert" : "status"}
+                role={
+                  uploadStatus === "error" || uploadStatus === "analysis-error"
+                    ? "alert"
+                    : "status"
+                }
                 aria-live="polite"
                 className={
-                  uploadStatus === "error"
+                  uploadStatus === "error" || uploadStatus === "analysis-error"
                     ? "rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
                     : "flex items-start gap-2 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm text-success"
                 }
@@ -619,6 +698,33 @@ export function VideoUploadForm({
                 ) : null}
                 <span>{feedback}</span>
               </p>
+            ) : null}
+
+            {analysisError && uploadedSessionId ? (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {analysisError.action === "SET_STANCE" ? (
+                  <Link
+                    href="/profile"
+                    className={cn(
+                      buttonVariants({ variant: "default", size: "lg" }),
+                      "h-11 w-full",
+                    )}
+                  >
+                    <UserRoundCogIcon aria-hidden="true" />
+                    プロフィールでスタンスを設定
+                  </Link>
+                ) : null}
+                <Link
+                  href={`/history/${encodeURIComponent(uploadedSessionId)}`}
+                  className={cn(
+                    buttonVariants({ variant: "outline", size: "lg" }),
+                    "h-11 w-full",
+                    analysisError.action !== "SET_STANCE" && "sm:col-span-2",
+                  )}
+                >
+                  アップロード済み動画を確認
+                </Link>
+              </div>
             ) : null}
 
             <Button
@@ -634,8 +740,12 @@ export function VideoUploadForm({
                   ? `アップロード中 ${uploadProgress}%`
                   : uploadStatus === "verifying"
                     ? "動画を確認しています…"
+                  : uploadStatus === "starting-analysis"
+                    ? "AI分析を受け付けています…"
                   : uploadStatus === "success"
-                    ? "アップロード完了"
+                    ? "分析中の画面へ移動します…"
+                    : uploadStatus === "analysis-error"
+                      ? "分析を開始できませんでした"
                     : "S3へ動画をアップロード"}
             </Button>
           </form>
