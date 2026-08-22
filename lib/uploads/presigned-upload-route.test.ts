@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createPresignedUploadRouteHandler } from "./presigned-upload-route";
+import {
+  PendingUploadCleanupError,
+  createPresignedUploadRouteHandler,
+} from "./presigned-upload-route";
 
 const pendingUpload = {
   sessionId: "00000000-0000-4000-8000-000000000001",
@@ -35,10 +38,29 @@ function jsonRequest(body: unknown) {
 }
 
 function setup() {
+  const committedSessionIds: string[] = [];
+  const committedVideoIds: string[] = [];
   const resolveCurrentUser = vi
     .fn()
     .mockResolvedValue({ id: "user-from-session" });
-  const createPendingUpload = vi.fn().mockResolvedValue(pendingUpload);
+  const createPendingUpload = vi.fn().mockImplementation(async () => {
+    committedSessionIds.push(pendingUpload.sessionId);
+    committedVideoIds.push(pendingUpload.videoId);
+    return pendingUpload;
+  });
+  const deletePendingUpload = vi.fn().mockImplementation(async (input) => {
+    if (
+      input.userId !== "user-from-session" ||
+      input.sessionId !== pendingUpload.sessionId ||
+      input.videoId !== pendingUpload.videoId
+    ) {
+      return false;
+    }
+
+    committedSessionIds.splice(0);
+    committedVideoIds.splice(0);
+    return true;
+  });
   const createVideoPresignedPost = vi.fn().mockResolvedValue({
     url: "https://configured-video-bucket.s3.example.com",
     fields: {
@@ -51,6 +73,7 @@ function setup() {
   const handler = createPresignedUploadRouteHandler({
     resolveCurrentUser,
     createPendingUpload,
+    deletePendingUpload,
     createVideoPresignedPost,
     reportUnexpectedError,
   });
@@ -59,8 +82,11 @@ function setup() {
     handler,
     resolveCurrentUser,
     createPendingUpload,
+    deletePendingUpload,
     createVideoPresignedPost,
     reportUnexpectedError,
+    committedSessionIds,
+    committedVideoIds,
   };
 }
 
@@ -70,7 +96,14 @@ describe("presigned upload route", () => {
   });
 
   it("creates server-owned records before returning the upload form", async () => {
-    const { handler, createPendingUpload, createVideoPresignedPost } = setup();
+    const {
+      handler,
+      createPendingUpload,
+      deletePendingUpload,
+      createVideoPresignedPost,
+      committedSessionIds,
+      committedVideoIds,
+    } = setup();
 
     const response = await handler(jsonRequest(validInput));
     const body = await response.json();
@@ -82,6 +115,9 @@ describe("presigned upload route", () => {
       s3Key: pendingUpload.s3Key,
       contentType: pendingUpload.contentType,
     });
+    expect(deletePendingUpload).not.toHaveBeenCalled();
+    expect(committedSessionIds).toEqual([pendingUpload.sessionId]);
+    expect(committedVideoIds).toEqual([pendingUpload.videoId]);
     expect(body).toEqual({
       url: "https://configured-video-bucket.s3.example.com",
       fields: {
@@ -145,11 +181,14 @@ describe("presigned upload route", () => {
     expect(createPendingUpload).not.toHaveBeenCalled();
   });
 
-  it("does not expose a raw AWS error to the client", async () => {
+  it("removes both pending rows when presigning fails", async () => {
     const {
       handler,
+      deletePendingUpload,
       createVideoPresignedPost,
       reportUnexpectedError,
+      committedSessionIds,
+      committedVideoIds,
     } = setup();
     const awsError = new Error(
       "AccessDenied: credential AKIA_SHOULD_NEVER_REACH_THE_BROWSER",
@@ -167,6 +206,68 @@ describe("presigned upload route", () => {
     );
     expect(responseText).not.toContain("AccessDenied");
     expect(responseText).not.toContain("AKIA_SHOULD_NEVER_REACH_THE_BROWSER");
+    expect(deletePendingUpload).toHaveBeenCalledWith({
+      userId: "user-from-session",
+      sessionId: pendingUpload.sessionId,
+      videoId: pendingUpload.videoId,
+    });
+    expect(committedSessionIds).toEqual([]);
+    expect(committedVideoIds).toEqual([]);
     expect(reportUnexpectedError).toHaveBeenCalledWith(awsError);
+  });
+
+  it("reports a compensating deletion failure without exposing either error", async () => {
+    const {
+      handler,
+      deletePendingUpload,
+      createVideoPresignedPost,
+      reportUnexpectedError,
+    } = setup();
+    const signingError = new Error("credential AKIA_SIGNING_SECRET");
+    const cleanupError = new Error("database password CLEANUP_SECRET");
+    createVideoPresignedPost.mockRejectedValue(signingError);
+    deletePendingUpload.mockRejectedValue(cleanupError);
+
+    const response = await handler(jsonRequest(validInput));
+    const responseText = await response.text();
+
+    expect(response.status).toBe(500);
+    expect(responseText).toBe(
+      JSON.stringify({
+        error: { code: "UPLOAD_INITIALIZATION_FAILED" },
+      }),
+    );
+    expect(responseText).not.toContain("AKIA_SIGNING_SECRET");
+    expect(responseText).not.toContain("CLEANUP_SECRET");
+    expect(reportUnexpectedError).toHaveBeenCalledOnce();
+    const [reportedError] = reportUnexpectedError.mock.calls[0];
+    expect(reportedError).toBeInstanceOf(PendingUploadCleanupError);
+    expect(reportedError).toMatchObject({
+      cause: signingError,
+      cleanupError,
+    });
+  });
+
+  it("reports when cleanup cannot confirm that the pending rows were deleted", async () => {
+    const {
+      handler,
+      deletePendingUpload,
+      createVideoPresignedPost,
+      reportUnexpectedError,
+    } = setup();
+    createVideoPresignedPost.mockRejectedValue(new Error("signing failed"));
+    deletePendingUpload.mockResolvedValue(false);
+
+    const response = await handler(jsonRequest(validInput));
+
+    expect(response.status).toBe(500);
+    expect(reportUnexpectedError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "PendingUploadCleanupError",
+        cleanupError: expect.objectContaining({
+          message: "No matching pending upload was deleted.",
+        }),
+      }),
+    );
   });
 });

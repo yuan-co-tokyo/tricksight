@@ -19,11 +19,28 @@ type PresignedPostResult = {
 type Dependencies = {
   resolveCurrentUser(): Promise<{ id: string } | null>;
   createPendingUpload(input: unknown): Promise<CreatePendingUploadResult>;
+  deletePendingUpload(input: {
+    userId: string;
+    sessionId: string;
+    videoId: string;
+  }): Promise<boolean>;
   createVideoPresignedPost(
     input: VideoPresignedPostInput,
   ): Promise<PresignedPostResult>;
   reportUnexpectedError?(error: unknown): void;
 };
+
+export class PendingUploadCleanupError extends Error {
+  readonly cleanupError: unknown;
+
+  constructor(signingError: unknown, cleanupError: unknown) {
+    super("Failed to remove pending upload after presigning failed.", {
+      cause: signingError,
+    });
+    this.name = "PendingUploadCleanupError";
+    this.cleanupError = cleanupError;
+  }
+}
 
 function errorResponse(code: string, status: number) {
   return Response.json(
@@ -42,15 +59,17 @@ export function createPresignedUploadRouteHandler(
     });
 
   return async function POST(request: Request) {
-    try {
-      const currentUser = await dependencies.resolveCurrentUser();
+    let currentUser: { id: string } | null;
 
-      if (!currentUser) {
-        return errorResponse("UNAUTHENTICATED", 401);
-      }
+    try {
+      currentUser = await dependencies.resolveCurrentUser();
     } catch (error) {
       reportUnexpectedError(error);
       return errorResponse("UPLOAD_INITIALIZATION_FAILED", 500);
+    }
+
+    if (!currentUser) {
+      return errorResponse("UNAUTHENTICATED", 401);
     }
 
     let input: unknown;
@@ -63,10 +82,34 @@ export function createPresignedUploadRouteHandler(
 
     try {
       const pendingUpload = await dependencies.createPendingUpload(input);
-      const presignedPost = await dependencies.createVideoPresignedPost({
-        s3Key: pendingUpload.s3Key,
-        contentType: pendingUpload.contentType,
-      });
+      let presignedPost: PresignedPostResult;
+
+      try {
+        presignedPost = await dependencies.createVideoPresignedPost({
+          s3Key: pendingUpload.s3Key,
+          contentType: pendingUpload.contentType,
+        });
+      } catch (signingError) {
+        try {
+          const deleted = await dependencies.deletePendingUpload({
+            userId: currentUser.id,
+            sessionId: pendingUpload.sessionId,
+            videoId: pendingUpload.videoId,
+          });
+
+          if (!deleted) {
+            throw new Error("No matching pending upload was deleted.");
+          }
+        } catch (cleanupError) {
+          reportUnexpectedError(
+            new PendingUploadCleanupError(signingError, cleanupError),
+          );
+          return errorResponse("UPLOAD_INITIALIZATION_FAILED", 500);
+        }
+
+        reportUnexpectedError(signingError);
+        return errorResponse("UPLOAD_INITIALIZATION_FAILED", 500);
+      }
 
       return Response.json(
         {
