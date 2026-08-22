@@ -8,6 +8,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
 import { z } from "zod";
 
+import { createAwsClientConfig } from "../lib/aws/client-config";
 import {
   skateAnalysisResultJsonSchema,
   skateAnalysisResultSchema,
@@ -342,8 +343,12 @@ async function main() {
   if (selectedProviders.includes("nova")) {
     novaModelId();
   }
-  const s3 = new S3Client({ region });
-  const bedrock = new BedrockRuntimeClient({ region, maxAttempts: 1 });
+  const awsClientConfig = createAwsClientConfig({ region });
+  const s3 = new S3Client(awsClientConfig);
+  const bedrock = new BedrockRuntimeClient({
+    ...awsClientConfig,
+    maxAttempts: 1,
+  });
   const evaluations: EvaluationResult[] = [];
 
   for (const sample of manifest.samples) {

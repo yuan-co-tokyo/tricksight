@@ -6,6 +6,8 @@ import {
 import { HeadBucketCommand, S3Client } from "@aws-sdk/client-s3";
 import { GetCallerIdentityCommand, STSClient } from "@aws-sdk/client-sts";
 
+import { createAwsClientConfig } from "../lib/aws/client-config";
+
 const DEFAULT_NOVA_INFERENCE_PROFILE_ID = "global.amazon.nova-2-lite-v1:0";
 
 function requiredEnvironment(name: string) {
@@ -21,9 +23,10 @@ function requiredEnvironment(name: string) {
 async function main() {
   const region = requiredEnvironment("AWS_REGION");
   const bucket = requiredEnvironment("S3_BUCKET_NAME");
-  const sts = new STSClient({ region });
-  const s3 = new S3Client({ region });
-  const bedrock = new BedrockClient({ region });
+  const awsClientConfig = createAwsClientConfig({ region });
+  const sts = new STSClient(awsClientConfig);
+  const s3 = new S3Client(awsClientConfig);
+  const bedrock = new BedrockClient(awsClientConfig);
 
   await sts.send(new GetCallerIdentityCommand({}));
   await s3.send(new HeadBucketCommand({ Bucket: bucket }));

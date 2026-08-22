@@ -8,6 +8,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { z } from "zod";
 
+import { createAwsClientConfig } from "../lib/aws/client-config";
 import {
   formatVideoAnalysisErrorDetails,
   VideoAnalysisError,
@@ -178,7 +179,9 @@ async function main() {
   }
 
   const provider = new TwelveLabsDirectVideoAnalyzer(config);
-  const s3 = new S3Client({ region: config.awsRegion });
+  const s3 = new S3Client(
+    createAwsClientConfig({ region: config.awsRegion }),
+  );
   const evaluations = [];
 
   for (const sample of samples) {

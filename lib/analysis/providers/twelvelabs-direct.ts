@@ -2,6 +2,7 @@ import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { TwelveLabs, type TwelvelabsApi } from "twelvelabs-js";
 
+import { createAwsClientConfig } from "../../aws/client-config";
 import {
   appendVideoContext,
   getPromptForTrick,
@@ -153,7 +154,9 @@ export class TwelveLabsDirectVideoAnalyzer implements VideoAnalysisProvider {
   constructor(config: TwelveLabsDirectConfig) {
     this.config = resolveConfig(config);
     this.modelId = this.config.modelName;
-    this.s3Client = new S3Client({ region: this.config.awsRegion });
+    this.s3Client = new S3Client(
+      createAwsClientConfig({ region: this.config.awsRegion }),
+    );
     this.client = new TwelveLabs({ apiKey: this.config.apiKey });
   }
 

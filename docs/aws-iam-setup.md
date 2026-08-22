@@ -28,7 +28,7 @@ IAMコンソール → ポリシー → ポリシーの作成 → JSONタブへ�
 
 **`<ACCOUNT_ID>`は自分の12桁のアカウントIDに置き換える。**
 
-ポリシー名は`tricksight-policy`とする。このポリシーは本番用ロールとローカル開発用ユーザーの両方にアタッチする。
+ポリシー名は`tricksight-policy`とする。このポリシーはローカル開発用ユーザーと初期セットアップで使用する。本番用ロールには権限が広すぎるためアタッチせず、後述の`tricksight-vercel-runtime-policy`を使う。
 
 ```json
 {
@@ -90,14 +90,28 @@ IAMコンソール → ポリシー → ポリシーの作成 → JSONタブへ�
 
 Vercelの本番環境から静的キーなしでAWSを呼ぶための設定。OIDC federationはHobbyプランでも利用できる。
 
+参照した一次情報：
+
+- [Vercel: Connect to Amazon Web Services](https://vercel.com/docs/oidc/aws)
+- [Vercel: OIDC Federation Reference](https://vercel.com/docs/oidc/reference)
+- [Vercel: Custom OIDC Token Audiences](https://vercel.com/changelog/custom-oidc-token-audiences)
+- [AWS IAM: Create an OpenID Connect identity provider](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html)
+- [AWS IAM: Create a role for OpenID Connect federation](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-idp_oidc.html)
+- [Amazon S3: Required permissions for API operations](https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-with-s3-policy-actions.html)
+- [Amazon S3: How Amazon S3 works with IAM](https://docs.aws.amazon.com/AmazonS3/latest/userguide/security_iam_service-with-iam.html)
+
 ### 2-1. OIDCアイデンティティプロバイダを登録する
+
+Vercelプロジェクトの Settings → Security → Secure backend access with OIDC federation で、Issuer Modeを**Team（推奨）**にする。
 
 IAMコンソール → IDプロバイダ → プロバイダを追加 → OpenID Connect。
 
 - **プロバイダのURL**：`https://oidc.vercel.com/<TEAM_SLUG>`
-- **対象者（Audience）**：`https://vercel.com/<TEAM_SLUG>`
+- **対象者（Audience）**：`sts.amazonaws.com`
 
 `<TEAM_SLUG>`はVercelのチームURLのパス部分（個人アカウントの場合はそのアカウントのスラッグ）に置き換える。
+
+アプリはVercelのOIDC token exchangeでAWS専用のカスタムAudienceを要求する。Vercelの既定Audience（`https://vercel.com/<TEAM_SLUG>`）をそのまま使わず`sts.amazonaws.com`へ限定することで、AWS以外を対象に発行されたトークンの再利用を防ぐ。
 
 ### 2-2. ロールを作る
 
@@ -115,8 +129,8 @@ IAMコンソール → IDプロバイダ → プロバイダを追加 → OpenID
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringEquals": {
-          "oidc.vercel.com/<TEAM_SLUG>:aud": "https://vercel.com/<TEAM_SLUG>",
-          "oidc.vercel.com/<TEAM_SLUG>:sub": "owner:<TEAM_SLUG>:project:tricksight:environment:production"
+          "oidc.vercel.com/<TEAM_SLUG>:aud": "sts.amazonaws.com",
+          "oidc.vercel.com/<TEAM_SLUG>:sub": "owner:<TEAM_SLUG>:project:<VERCEL_PROJECT_NAME>:environment:production"
         }
       }
     }
@@ -124,7 +138,29 @@ IAMコンソール → IDプロバイダ → プロバイダを追加 → OpenID
 }
 ```
 
-このロールに`tricksight-policy`をアタッチする。
+`<VERCEL_PROJECT_NAME>`はVercel Dashboardに表示されるプロジェクト名（通常は`tricksight`）と完全一致させる。
+
+次の権限ポリシーを`tricksight-vercel-runtime-policy`として作成し、このロールだけにアタッチする。`<S3_BUCKET_NAME>`はProductionの`S3_BUCKET_NAME`と同じ実バケット名へ置き換える。
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "PrivateVideoObjects",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::<S3_BUCKET_NAME>/private/*"
+    }
+  ]
+}
+```
+
+ブラウザ直接アップロードの署名には`PutObject`、再生・TwelveLabsへの入力URL・`HeadObject`検証には`GetObject`、不正アップロードの後始末には`DeleteObject`が必要である。ランタイムはバケット一覧やCORS変更をしないため、`ListBucket`、`CreateBucket`、`PutBucketCors`は付与しない。`sts:AssumeRoleWithWebIdentity`は上の信頼ポリシーで許可するものであり、権限ポリシーへ追加する必要はない。
 
 `sub`を`production`だけに限定しているため、Preview Deploymentと`development`（ローカル）はこのロールを引けない。Previewへ本番用ロールを許可すると、Previewコードから本番動画の取得・削除やBedrock呼び出しが可能になるため、MVPでは許可しない。ローカルは次章のアクセスキーを使う。
 
@@ -138,9 +174,13 @@ Vercelプロジェクトの環境変数へ以下を**Production環境だけを�
 AWS_ROLE_ARN=arn:aws:iam::<ACCOUNT_ID>:role/tricksight-vercel-role
 AWS_REGION=ap-northeast-2
 S3_BUCKET_NAME=tricksight-videos-<suffix>
+TWELVELABS_API_KEY=<production-api-key>
+TWELVELABS_MODEL_NAME=pegasus1.5
 ```
 
 **`AWS_REGION`の明示は必須である。** Vercelは`AWS_REGION`を関数の実行リージョンで自動設定するため、明示しないと東京（`ap-northeast-1`）が入り、ソウルにあるS3とBedrockを呼べなくなる。この構成では関数の実行リージョンとAWS資源のリージョンが意図的に異なるため、必ず上書きする。
+
+Productionに`AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY`、`AWS_SESSION_TOKEN`、`VERCEL_OIDC_TOKEN`を手動設定しない。OIDCトークンはVercelがFunctionのリクエストコンテキストへ自動供給する。
 
 ### 2-4. アプリ側の実装
 
@@ -149,14 +189,15 @@ pnpm add @aws-sdk/client-s3 @aws-sdk/client-bedrock-runtime @aws-sdk/s3-presigne
 ```
 
 ```ts
-import { awsCredentialsProvider } from "@vercel/oidc-aws-credentials-provider";
+import { createAwsClientConfig } from "@/lib/aws/client-config";
+import { S3Client } from "@aws-sdk/client-s3";
 
-const credentials = awsCredentialsProvider({
-  roleArn: process.env.AWS_ROLE_ARN!,
-});
+const client = new S3Client(
+  createAwsClientConfig({ region: "ap-northeast-2" }),
+);
 ```
 
-ローカル開発ではこのプロバイダが使えないため、環境で認証方法を切り替える。ローカルはアクセスキー（SDKが環境変数から自動的に拾う）、本番は上記のプロバイダとし、切り替えはAI分析モジュール内の1か所に閉じる。
+`createAwsClientConfig`は`AWS_ROLE_ARN`の有無だけで切り替える。設定されていれば`@vercel/oidc-aws-credentials-provider`の`awsCredentialsProvider`を使い、Audienceを`sts.amazonaws.com`として`AssumeRoleWithWebIdentity`を行う。未設定なら`credentials`をS3Clientへ渡さず、AWS SDKの既定認証情報チェーンがローカルのアクセスキーや将来のLambda実行ロールを解決する。共通処理はNext.jsへ依存しない。
 
 ## 3. ローカル開発用のIAMユーザーを作る
 
