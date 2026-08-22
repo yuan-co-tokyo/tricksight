@@ -1,36 +1,26 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { type ReactNode, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   Clock3Icon,
   LogInIcon,
-  RefreshCwIcon,
   TriangleAlertIcon,
   UserRoundCogIcon,
   VideoIcon,
 } from "lucide-react";
 
-import { Button, buttonVariants } from "@/components/ui/button";
-import {
-  AnalysisRequestError,
-  requestAnalysisStart,
-  type AnalysisRequestErrorDetail,
-  type AnalysisStartResponse,
+import { buttonVariants } from "@/components/ui/button";
+import type {
+  AnalysisRequestErrorDetail,
+  AnalysisStartResponse,
 } from "@/lib/analysis/analysis-client";
 import { getAnalysisFailureGuidance } from "@/lib/analysis/analysis-failure-guidance";
 import type { PublicAnalysisError } from "@/lib/analysis/analysis-public-error";
 import { cn } from "@/lib/utils";
 
 import { AnalysisProgress } from "./analysis-progress";
-
-const fallbackRetryError: AnalysisRequestErrorDetail = {
-  code: "ANALYSIS_UNAVAILABLE",
-  message:
-    "現在、分析を利用できません。時間をおいてからもう一度お試しください。",
-  action: "TRY_LATER",
-};
+import { AnalysisStartButton } from "./analysis-start-button";
 
 function LinkAction({
   href,
@@ -38,8 +28,8 @@ function LinkAction({
   children,
 }: {
   href: string;
-  icon: React.ReactNode;
-  children: React.ReactNode;
+  icon: ReactNode;
+  children: ReactNode;
 }) {
   return (
     <Link
@@ -58,40 +48,17 @@ function LinkAction({
 export function AnalysisFailureActions({
   videoId,
   initialError,
+  heading = "分析を完了できませんでした",
 }: {
   videoId: string | null;
   initialError: PublicAnalysisError;
+  heading?: string;
 }) {
-  const router = useRouter();
-  const submittingRef = useRef(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] =
     useState<AnalysisRequestErrorDetail>(initialError);
   const [startedAnalysis, setStartedAnalysis] =
     useState<AnalysisStartResponse | null>(null);
   const guidance = getAnalysisFailureGuidance(error);
-
-  async function handleRetry() {
-    if (!videoId || submittingRef.current) return;
-
-    submittingRef.current = true;
-    setIsSubmitting(true);
-
-    try {
-      const started = await requestAnalysisStart(videoId);
-      setStartedAnalysis(started);
-      router.refresh();
-    } catch (reason) {
-      setError(
-        reason instanceof AnalysisRequestError
-          ? reason.detail
-          : fallbackRetryError,
-      );
-    } finally {
-      submittingRef.current = false;
-      setIsSubmitting(false);
-    }
-  }
 
   if (startedAnalysis) {
     return (
@@ -112,7 +79,7 @@ export function AnalysisFailureActions({
           <TriangleAlertIcon aria-hidden="true" className="size-5" />
         </span>
         <div className="min-w-0">
-          <p className="font-semibold text-foreground">分析を完了できませんでした</p>
+          <p className="font-semibold text-foreground">{heading}</p>
           <p className="mt-1 text-sm font-medium text-error">
             {guidance.title}
           </p>
@@ -131,19 +98,11 @@ export function AnalysisFailureActions({
             新しい動画を登録
           </LinkAction>
         ) : guidance.kind === "retry" ? (
-          <Button
-            type="button"
-            size="lg"
-            className="h-11 w-full"
-            onClick={handleRetry}
-            disabled={isSubmitting}
-          >
-            <RefreshCwIcon
-              aria-hidden="true"
-              className={cn(isSubmitting && "animate-spin")}
-            />
-            {isSubmitting ? "再分析を受け付けています…" : "もう一度分析する"}
-          </Button>
+          <AnalysisStartButton
+            videoId={videoId}
+            onStarted={setStartedAnalysis}
+            onError={setError}
+          />
         ) : guidance.kind === "profile" ? (
           <LinkAction
             href="/profile"

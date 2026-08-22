@@ -11,12 +11,14 @@ import {
   LightbulbIcon,
   SparklesIcon,
   TargetIcon,
+  TriangleAlertIcon,
   VideoIcon,
   XCircleIcon,
 } from "lucide-react";
 import { z } from "zod";
 
 import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -31,6 +33,7 @@ import {
   getCompletedAnalysisResult,
 } from "@/lib/history-detail";
 import { publicAnalysisFailure } from "@/lib/analysis/analysis-public-error";
+import { getVisibilityGuidance } from "@/lib/analysis/visibility-guidance";
 import {
   isPlayableVideoStatus,
   type PlaybackVideoStatus,
@@ -40,6 +43,7 @@ import { cn } from "@/lib/utils";
 
 import { AnalysisProgress } from "./analysis-progress";
 import { AnalysisFailureActions } from "./analysis-failure-actions";
+import { AnalysisReanalysisAction } from "./analysis-reanalysis-action";
 
 type HistoryDetailPageProps = {
   params: Promise<{ sessionId: string }>;
@@ -160,6 +164,51 @@ function StatusNotice({
   );
 }
 
+function VisibilityRetakeGuidance({
+  visibility,
+}: {
+  visibility: "GOOD" | "PARTIAL" | "POOR";
+}) {
+  const guidance = getVisibilityGuidance(visibility);
+
+  if (!guidance) return null;
+
+  return (
+    <aside
+      aria-label="撮影方法の再案内"
+      className="rounded-xl border border-warning/40 bg-warning/10 p-4 sm:p-5"
+    >
+      <div className="flex min-w-0 items-start gap-3">
+        <span className="grid size-9 shrink-0 place-items-center rounded-full bg-warning/15 text-warning">
+          <TriangleAlertIcon aria-hidden="true" className="size-5" />
+        </span>
+        <div className="min-w-0 space-y-2">
+          <p className="font-semibold text-warning">{guidance.title}</p>
+          <p className="text-sm leading-6 text-foreground">
+            {guidance.resultContext}
+          </p>
+          <p className="text-sm leading-6 text-foreground">
+            {guidance.requirement}
+          </p>
+          <p className="text-xs leading-5 text-muted-foreground">
+            {guidance.explanation}
+          </p>
+          <Link
+            href="/videos/new"
+            className={cn(
+              buttonVariants({ variant: "outline", size: "lg" }),
+              "mt-2 h-11 w-full border-warning/40 bg-warning/10 text-warning hover:bg-warning/20 hover:text-warning sm:w-auto",
+            )}
+          >
+            <VideoIcon aria-hidden="true" />
+            新しい動画を登録
+          </Link>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
 function AnalysisResult({
   analysis,
   videoId,
@@ -210,6 +259,10 @@ function AnalysisResult({
 
   return (
     <div className="space-y-6">
+      <VisibilityRetakeGuidance
+        visibility={result.detected.visibility}
+      />
+
       <section aria-labelledby="analysis-summary-heading" className="space-y-2">
         <h3
           id="analysis-summary-heading"
@@ -362,6 +415,8 @@ function AnalysisResult({
           安全メモ: {result.safetyNote}
         </p>
       ) : null}
+
+      {videoId ? <AnalysisReanalysisAction videoId={videoId} /> : null}
     </div>
   );
 }
@@ -592,7 +647,9 @@ export default async function HistoryDetailPage({
                 </dd>
               </div>
               <div className="min-w-0 sm:col-span-2 lg:col-span-1">
-                <dt className="text-xs text-muted-foreground">メモ</dt>
+                <dt className="text-xs text-muted-foreground">
+                  ユーザーメモ
+                </dt>
                 <dd className="mt-1 break-words whitespace-pre-wrap leading-6">
                   {session.memo || "メモはありません。"}
                 </dd>

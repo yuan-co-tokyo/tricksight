@@ -33,7 +33,7 @@ const completedOllieResult = {
   summary: "安定した構えからテールを弾き、ボードと一緒に着地できています。",
   detected: {
     trickMatchesSelection: true,
-    visibility: "GOOD",
+    visibility: "POOR",
   },
   result: {
     outcome: "LANDED",

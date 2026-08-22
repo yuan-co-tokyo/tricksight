@@ -50,6 +50,7 @@ import {
   validateVideoFileBasics,
 } from "@/lib/uploads/client-video-validation";
 import type { AllowedVideoContentType } from "@/lib/uploads/video-constraints";
+import { SLOW_MOTION_VIDEO_GUIDANCE } from "@/lib/uploads/slow-motion-guidance";
 import { cn } from "@/lib/utils";
 
 type TrickOption = {
@@ -450,13 +451,13 @@ export function VideoUploadForm({
           </span>
           <div className="min-w-0 space-y-2">
             <h2 className="font-semibold text-warning">
-              スローモーション動画が必要です
+              {SLOW_MOTION_VIDEO_GUIDANCE.title}
             </h2>
             <p className="text-sm leading-6 text-foreground">
-              通常速度の撮影では板の回転が十分なフレームに映らず、分析が成立しません。スロー再生された状態で書き出した、3〜20秒の動画を選んでください。
+              {SLOW_MOTION_VIDEO_GUIDANCE.requirement}
             </p>
             <p className="text-xs leading-5 text-muted-foreground">
-              重要なのはfpsの数値ではなく、ファイルを再生したときの長さです。高fpsで撮っただけの通常速度動画ではなく、スロー再生として書き出したファイルを用意してください。
+              {SLOW_MOTION_VIDEO_GUIDANCE.explanation}
             </p>
           </div>
         </div>
