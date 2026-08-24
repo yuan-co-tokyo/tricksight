@@ -23,6 +23,7 @@ type HistoryPageProps = {
   searchParams: Promise<{
     trick?: string | string[];
     page?: string | string[];
+    deleted?: string | string[];
   }>;
 };
 
@@ -289,6 +290,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
   const activeTricks = await listActiveTricks(user.id);
   const requestedTrick = firstSearchParam(requestedParams.trick);
   const requestedPage = firstSearchParam(requestedParams.page);
+  const deletionCompleted = firstSearchParam(requestedParams.deleted) === "1";
   const selectedTrick = activeTricks.find(
     (trick) => trick.slug === requestedTrick,
   );
@@ -324,9 +326,18 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
           </p>
         </div>
         <p className="text-muted-foreground">
-          過去の練習動画と分析結果を、トリックごとに振り返れます。
+          カードから練習動画と分析結果の確認や履歴の削除ができます。
         </p>
       </div>
+
+      {deletionCompleted ? (
+        <p
+          role="status"
+          className="rounded-lg border border-success/30 bg-success/10 p-3 text-sm font-medium text-success"
+        >
+          動画と練習履歴を削除しました。
+        </p>
+      ) : null}
 
       <nav aria-label="トリックで履歴を絞り込む">
         <ul className="flex flex-wrap gap-2">

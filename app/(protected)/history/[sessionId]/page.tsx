@@ -44,6 +44,7 @@ import { cn } from "@/lib/utils";
 import { AnalysisProgress } from "./analysis-progress";
 import { AnalysisFailureActions } from "./analysis-failure-actions";
 import { AnalysisReanalysisAction } from "./analysis-reanalysis-action";
+import { DeleteSessionAction } from "./delete-session-action";
 
 type HistoryDetailPageProps = {
   params: Promise<{ sessionId: string }>;
@@ -682,6 +683,25 @@ export default async function HistoryDetailPage({
       {session.latestAnalysis ? (
         <AnalysisMetadata analysis={session.latestAnalysis} />
       ) : null}
+
+      <Card className="border-error/30">
+        <CardHeader>
+          <CardTitle>練習履歴の削除</CardTitle>
+          <CardDescription>
+            動画、登録情報、AI分析結果をまとめて削除します。
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <DeleteSessionAction
+            sessionId={session.id}
+            sessionLabel={`${session.trick.name}（${practiceDateFormatter.format(session.practicedAt)}）`}
+            analysisInProgress={
+              session.latestAnalysis?.status === "QUEUED" ||
+              session.latestAnalysis?.status === "ANALYZING"
+            }
+          />
+        </CardContent>
+      </Card>
 
       <p className="flex items-center gap-2 text-xs text-muted-foreground">
         <Clock3Icon aria-hidden="true" className="size-3.5" />
