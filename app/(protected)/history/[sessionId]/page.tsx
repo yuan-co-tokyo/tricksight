@@ -34,6 +34,7 @@ import {
 } from "@/lib/history-detail";
 import { publicAnalysisFailure } from "@/lib/analysis/analysis-public-error";
 import { getVisibilityGuidance } from "@/lib/analysis/visibility-guidance";
+import { reportApplicationError } from "@/lib/observability/application-log";
 import {
   isPlayableVideoStatus,
   type PlaybackVideoStatus,
@@ -544,7 +545,14 @@ export default async function HistoryDetailPage({
     playbackUrl = await createOwnedVideoPlaybackUrl(session);
   } catch (error) {
     playbackUrlFailed = true;
-    console.error("Failed to issue a video playback URL.", error);
+    reportApplicationError({
+      event: "video.playback_url.failed",
+      error,
+      context: {
+        sessionId: session.id,
+        videoId: session.video?.id,
+      },
+    });
   }
 
   const outcome = outcomePresentation[session.userOutcome];

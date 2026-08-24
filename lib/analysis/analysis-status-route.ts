@@ -5,6 +5,7 @@ import {
   ANALYSIS_REQUEST_ERRORS,
   type PublicAnalysisError,
 } from "./analysis-public-error";
+import { createUnexpectedErrorReporter } from "../observability/application-log";
 
 const NO_STORE_HEADERS = {
   "Cache-Control": "no-store",
@@ -33,11 +34,10 @@ function errorResponse(error: PublicAnalysisError, status: number) {
 export function createAnalysisStatusRouteHandler(
   dependencies: Dependencies,
 ) {
-  const reportUnexpectedError =
-    dependencies.reportUnexpectedError ??
-    ((error: unknown) => {
-      console.error("Failed to read analysis status.", error);
-    });
+  const reportUnexpectedError = createUnexpectedErrorReporter({
+    event: "analysis.status.failed",
+    reporter: dependencies.reportUnexpectedError,
+  });
 
   return async function GET(
     _request: Request,
@@ -48,7 +48,7 @@ export function createAnalysisStatusRouteHandler(
     try {
       currentUser = await dependencies.resolveCurrentUser();
     } catch (error) {
-      reportUnexpectedError(error);
+      reportUnexpectedError(error, { stage: "resolve_current_user" });
       return errorResponse(ANALYSIS_REQUEST_ERRORS.ANALYSIS_UNAVAILABLE, 500);
     }
 
@@ -83,7 +83,10 @@ export function createAnalysisStatusRouteHandler(
         },
       );
     } catch (error) {
-      reportUnexpectedError(error);
+      reportUnexpectedError(error, {
+        stage: "read_status",
+        analysisId,
+      });
       return errorResponse(ANALYSIS_REQUEST_ERRORS.ANALYSIS_UNAVAILABLE, 500);
     }
   };

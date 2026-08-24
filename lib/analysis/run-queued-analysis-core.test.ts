@@ -89,6 +89,7 @@ function setup(options: {
     analyze,
   };
   const createProvider = vi.fn(() => provider);
+  const reportFailure = vi.fn();
   const timestamps = [startedAt, completedAt];
   const runner = createRunQueuedAnalysis({
     store,
@@ -102,6 +103,7 @@ function setup(options: {
       (s3Key) => `s3://private-bucket/${s3Key}`,
     ),
     now: () => timestamps.shift() ?? completedAt,
+    reportFailure,
   });
 
   return {
@@ -111,6 +113,7 @@ function setup(options: {
     createProvider,
     failAnalysis,
     loadExecutionContext,
+    reportFailure,
     runner,
   };
 }
@@ -194,7 +197,7 @@ describe("run queued analysis", () => {
       "client-safe summary",
       { details: "sanitized provider details" },
     );
-    const { completeAnalysis, failAnalysis, runner } = setup({
+    const { completeAnalysis, failAnalysis, reportFailure, runner } = setup({
       analyzeError: providerError,
     });
 
@@ -209,6 +212,11 @@ describe("run queued analysis", () => {
       errorMessage: "sanitized provider details",
       rawResponse: null,
       completedAt,
+    });
+    expect(reportFailure).toHaveBeenCalledWith({
+      analysisId,
+      errorCode: "PROVIDER_FAILED",
+      error: providerError,
     });
     expect(completeAnalysis).not.toHaveBeenCalled();
   });

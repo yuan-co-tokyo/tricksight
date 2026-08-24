@@ -370,6 +370,10 @@ ollie-007 (失敗)  85/80/85/80/85   ← 成功と完全に同一
 
 `QUEUED` / `ANALYZING`の分析がある間は削除を拒否する。実行中のprovider処理を安全に中断する仕組みがなく、外部キーのcascadeで分析行を消すと`after()`側の完了・失敗更新も成立しなくなるためである。厳密な分散トランザクションが必要になった場合は、durable outboxと再試行workerを別途導入する。
 
+### T8-4の運用ログ
+
+Vercel Runtime Logsで検索する構造化イベント、分析失敗時のDB調査、S3 CloudWatch request metricsとの責務分担、秘密情報をログへ出さない境界は[`operations-logging.md`](./operations-logging.md)にまとめる。
+
 ## T9：Bedrock解禁後（保留）
 
 | ID | タスク |

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { SessionDeletionError } from "./session-deletion-core";
+import { createUnexpectedErrorReporter } from "../observability/application-log";
 
 const NO_STORE_HEADERS = {
   "Cache-Control": "no-store",
@@ -25,11 +26,10 @@ function errorResponse(code: string, status: number) {
 export function createSessionDeletionRouteHandler(
   dependencies: Dependencies,
 ) {
-  const reportUnexpectedError =
-    dependencies.reportUnexpectedError ??
-    ((error: unknown) => {
-      console.error("Failed to delete a practice session.", error);
-    });
+  const reportUnexpectedError = createUnexpectedErrorReporter({
+    event: "session.deletion.failed",
+    reporter: dependencies.reportUnexpectedError,
+  });
 
   return async function DELETE(
     _request: Request,
@@ -40,7 +40,7 @@ export function createSessionDeletionRouteHandler(
     try {
       currentUser = await dependencies.resolveCurrentUser();
     } catch (error) {
-      reportUnexpectedError(error);
+      reportUnexpectedError(error, { stage: "resolve_current_user" });
       return errorResponse("SESSION_DELETE_FAILED", 500);
     }
 
@@ -74,11 +74,21 @@ export function createSessionDeletionRouteHandler(
           return errorResponse("ANALYSIS_IN_PROGRESS", 409);
         }
 
-        reportUnexpectedError(error.cause ?? error);
+        reportUnexpectedError(error.cause ?? error, {
+          stage:
+            error.code === "OBJECT_DELETE_FAILED"
+              ? "delete_object"
+              : "delete_database",
+          errorCode: error.code,
+          sessionId,
+        });
         return errorResponse("SESSION_DELETE_FAILED", 500);
       }
 
-      reportUnexpectedError(error);
+      reportUnexpectedError(error, {
+        stage: "delete_session",
+        sessionId,
+      });
       return errorResponse("SESSION_DELETE_FAILED", 500);
     }
   };

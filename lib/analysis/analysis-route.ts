@@ -10,6 +10,7 @@ import {
   type PublicAnalysisError,
 } from "./analysis-public-error";
 import type { RunQueuedAnalysisResult } from "./run-queued-analysis-core";
+import { createUnexpectedErrorReporter } from "../observability/application-log";
 
 const NO_STORE_HEADERS = {
   "Cache-Control": "no-store",
@@ -30,11 +31,10 @@ function errorResponse(error: PublicAnalysisError, status: number) {
 }
 
 export function createAnalysisRouteHandler(dependencies: Dependencies) {
-  const reportUnexpectedError =
-    dependencies.reportUnexpectedError ??
-    ((error: unknown) => {
-      console.error("Failed to run queued video analysis.", error);
-    });
+  const reportUnexpectedError = createUnexpectedErrorReporter({
+    event: "analysis.request.failed",
+    reporter: dependencies.reportUnexpectedError,
+  });
 
   return async function POST(request: Request) {
     let body: unknown;
@@ -54,7 +54,10 @@ export function createAnalysisRouteHandler(dependencies: Dependencies) {
             // after()がこのPromiseのsettleまで関数実行を延長する。
             await dependencies.runQueuedAnalysis(queued.analysis.id);
           } catch (error) {
-            reportUnexpectedError(error);
+            reportUnexpectedError(error, {
+              stage: "after",
+              analysisId: queued.analysis.id,
+            });
           }
         });
       }
@@ -85,7 +88,7 @@ export function createAnalysisRouteHandler(dependencies: Dependencies) {
             return errorResponse(ANALYSIS_REQUEST_ERRORS.ANALYSIS_UNAVAILABLE, 503);
           case "DAILY_LIMIT_REACHED":
             if (error.limit === null || error.resetAt === null) {
-              reportUnexpectedError(error);
+              reportUnexpectedError(error, { stage: "queue_analysis" });
               return errorResponse(
                 ANALYSIS_REQUEST_ERRORS.ANALYSIS_UNAVAILABLE,
                 500,
@@ -119,7 +122,7 @@ export function createAnalysisRouteHandler(dependencies: Dependencies) {
         }
       }
 
-      reportUnexpectedError(error);
+      reportUnexpectedError(error, { stage: "queue_analysis" });
       return errorResponse(ANALYSIS_REQUEST_ERRORS.ANALYSIS_UNAVAILABLE, 500);
     }
   };

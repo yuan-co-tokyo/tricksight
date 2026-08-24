@@ -44,6 +44,10 @@ type Dependencies = {
   store: AnalysisStatusStore;
   now(): Date;
   stuckThresholdMs?: number;
+  reportStuckAnalysis?(input: {
+    analysisId: string;
+    errorCode: typeof STUCK_ANALYSIS_ERROR_CODE;
+  }): void;
 };
 
 function publicStatus(
@@ -90,7 +94,13 @@ export function createOwnedAnalysisStatusReader(dependencies: Dependencies) {
         "分析ワーカーが制限時間内に完了しなかったため、スタック検出により失敗扱いにしました。",
     });
 
-    if (failed) return publicStatus(failed);
+    if (failed) {
+      dependencies.reportStuckAnalysis?.({
+        analysisId: failed.id,
+        errorCode: STUCK_ANALYSIS_ERROR_CODE,
+      });
+      return publicStatus(failed);
+    }
 
     // 別pollまたはworkerが先に状態遷移した場合は、その確定済み状態を返す。
     const concurrent = await dependencies.store.findOwnedAnalysis(input);

@@ -243,6 +243,7 @@ describe("presigned upload route", () => {
     const [reportedError] = reportUnexpectedError.mock.calls[0];
     expect(reportedError).toBeInstanceOf(PendingUploadCleanupError);
     expect(reportedError).toMatchObject({
+      code: "PENDING_UPLOAD_CLEANUP_FAILED",
       cause: signingError,
       cleanupError,
     });

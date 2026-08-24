@@ -42,14 +42,24 @@ function setup(options: {
     findOwnedAnalysis,
     failOwnedStuckAnalysis,
   } satisfies AnalysisStatusStore;
-  const reader = createOwnedAnalysisStatusReader({ store, now: () => now });
+  const reportStuckAnalysis = vi.fn();
+  const reader = createOwnedAnalysisStatusReader({
+    store,
+    now: () => now,
+    reportStuckAnalysis,
+  });
 
-  return { failOwnedStuckAnalysis, findOwnedAnalysis, reader };
+  return {
+    failOwnedStuckAnalysis,
+    findOwnedAnalysis,
+    reader,
+    reportStuckAnalysis,
+  };
 }
 
 describe("owned analysis status reader", () => {
   it("conditionally fails an ANALYZING record older than ten minutes", async () => {
-    const { failOwnedStuckAnalysis, reader } = setup();
+    const { failOwnedStuckAnalysis, reader, reportStuckAnalysis } = setup();
 
     await expect(reader({ userId, analysisId })).resolves.toEqual({
       analysisId,
@@ -70,6 +80,10 @@ describe("owned analysis status reader", () => {
       completedAt: now,
       errorCode: STUCK_ANALYSIS_ERROR_CODE,
       errorMessage: expect.stringContaining("スタック検出"),
+    });
+    expect(reportStuckAnalysis).toHaveBeenCalledWith({
+      analysisId,
+      errorCode: STUCK_ANALYSIS_ERROR_CODE,
     });
   });
 
@@ -108,10 +122,12 @@ describe("owned analysis status reader", () => {
       status: "COMPLETED" as const,
       errorCode: null,
     };
-    const { failOwnedStuckAnalysis, findOwnedAnalysis, reader } = setup({
-      failed: null,
-      concurrent: completed,
-    });
+    const {
+      failOwnedStuckAnalysis,
+      findOwnedAnalysis,
+      reader,
+      reportStuckAnalysis,
+    } = setup({ failed: null, concurrent: completed });
 
     await expect(reader({ userId, analysisId })).resolves.toEqual({
       analysisId,
@@ -120,6 +136,7 @@ describe("owned analysis status reader", () => {
     });
     expect(failOwnedStuckAnalysis).toHaveBeenCalledOnce();
     expect(findOwnedAnalysis).toHaveBeenCalledTimes(2);
+    expect(reportStuckAnalysis).not.toHaveBeenCalled();
   });
 
   it("does not attempt recovery when the owned analysis is absent", async () => {

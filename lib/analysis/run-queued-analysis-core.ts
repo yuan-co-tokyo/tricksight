@@ -67,6 +67,11 @@ export type RunQueuedAnalysisDependencies = {
   resolvePrompt(trickSlug: string): ResolvedQueuedAnalysisPrompt;
   createVideoS3Uri(s3Key: string): string;
   now(): Date;
+  reportFailure?(input: {
+    analysisId: string;
+    errorCode: string;
+    error: unknown;
+  }): void;
 };
 
 export type RunQueuedAnalysisResult =
@@ -232,6 +237,12 @@ export function createRunQueuedAnalysis(
           { cause },
         );
       }
+
+      dependencies.reportFailure?.({
+        analysisId,
+        errorCode: failure.errorCode,
+        error: cause,
+      });
 
       return {
         outcome: "FAILED",

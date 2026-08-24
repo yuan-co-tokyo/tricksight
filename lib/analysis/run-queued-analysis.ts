@@ -11,6 +11,7 @@ import {
   videos,
 } from "@/lib/db/schema";
 import { createVideoUploadStorageConfigFromEnv } from "@/lib/uploads/presigned-post-core";
+import { reportApplicationError } from "@/lib/observability/application-log";
 import {
   getPromptForTrick,
   isSupportedTrickSlug,
@@ -140,4 +141,14 @@ export const runQueuedAnalysis = createRunQueuedAnalysis({
     return `s3://${bucket}/${s3Key}`;
   },
   now: () => new Date(),
+  reportFailure(input) {
+    reportApplicationError({
+      event: "analysis.execution.failed",
+      error: input.error,
+      context: {
+        analysisId: input.analysisId,
+        errorCode: input.errorCode,
+      },
+    });
+  },
 });

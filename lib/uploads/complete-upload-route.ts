@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { UploadCompletionError } from "./complete-upload-core";
+import { createUnexpectedErrorReporter } from "../observability/application-log";
 
 const NO_STORE_HEADERS = {
   "Cache-Control": "no-store",
@@ -30,11 +31,10 @@ function errorResponse(code: string, status: number) {
 export function createCompleteUploadRouteHandler(
   dependencies: Dependencies,
 ) {
-  const reportUnexpectedError =
-    dependencies.reportUnexpectedError ??
-    ((error: unknown) => {
-      console.error("Failed to complete video upload.", error);
-    });
+  const reportUnexpectedError = createUnexpectedErrorReporter({
+    event: "upload.completion.failed",
+    reporter: dependencies.reportUnexpectedError,
+  });
 
   return async function POST(request: Request) {
     let currentUser: { id: string } | null;
@@ -42,7 +42,7 @@ export function createCompleteUploadRouteHandler(
     try {
       currentUser = await dependencies.resolveCurrentUser();
     } catch (error) {
-      reportUnexpectedError(error);
+      reportUnexpectedError(error, { stage: "resolve_current_user" });
       return errorResponse("UPLOAD_COMPLETION_FAILED", 500);
     }
 
@@ -86,11 +86,28 @@ export function createCompleteUploadRouteHandler(
           return errorResponse("UPLOAD_VERIFICATION_FAILED", 422);
         }
 
-        reportUnexpectedError(error.cause ?? error);
+        reportUnexpectedError(error.cause ?? error, {
+          stage: "cleanup_invalid_object",
+          errorCode: error.code,
+          sessionId:
+            body &&
+            typeof body === "object" &&
+            "sessionId" in body &&
+            z.uuid().safeParse(body.sessionId).success
+              ? (body.sessionId as string)
+              : undefined,
+          videoId:
+            body &&
+            typeof body === "object" &&
+            "videoId" in body &&
+            z.uuid().safeParse(body.videoId).success
+              ? (body.videoId as string)
+              : undefined,
+        });
         return errorResponse("UPLOAD_COMPLETION_FAILED", 500);
       }
 
-      reportUnexpectedError(error);
+      reportUnexpectedError(error, { stage: "complete_upload" });
       return errorResponse("UPLOAD_COMPLETION_FAILED", 500);
     }
   };

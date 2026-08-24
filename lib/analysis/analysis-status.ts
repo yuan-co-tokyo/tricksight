@@ -4,6 +4,7 @@ import { and, eq, exists, lt } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { analyses, practiceSessions, videos } from "@/lib/db/schema";
+import { reportApplicationWarning } from "@/lib/observability/application-log";
 
 import {
   createOwnedAnalysisStatusReader,
@@ -83,4 +84,10 @@ const analysisStatusStore: AnalysisStatusStore = {
 export const getOwnedAnalysisStatus = createOwnedAnalysisStatusReader({
   store: analysisStatusStore,
   now: () => new Date(),
+  reportStuckAnalysis(input) {
+    reportApplicationWarning({
+      event: "analysis.stuck_detected",
+      context: input,
+    });
+  },
 });

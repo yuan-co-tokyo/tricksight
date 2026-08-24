@@ -6,6 +6,7 @@ import {
 } from "../db/mutations/pending-upload-core";
 
 import type { VideoPresignedPostInput } from "./presigned-post-core";
+import { createUnexpectedErrorReporter } from "../observability/application-log";
 
 const NO_STORE_HEADERS = {
   "Cache-Control": "no-store",
@@ -31,6 +32,7 @@ type Dependencies = {
 };
 
 export class PendingUploadCleanupError extends Error {
+  readonly code = "PENDING_UPLOAD_CLEANUP_FAILED";
   readonly cleanupError: unknown;
 
   constructor(signingError: unknown, cleanupError: unknown) {
@@ -52,11 +54,10 @@ function errorResponse(code: string, status: number) {
 export function createPresignedUploadRouteHandler(
   dependencies: Dependencies,
 ) {
-  const reportUnexpectedError =
-    dependencies.reportUnexpectedError ??
-    ((error: unknown) => {
-      console.error("Failed to initialize video upload.", error);
-    });
+  const reportUnexpectedError = createUnexpectedErrorReporter({
+    event: "upload.presigned_post.failed",
+    reporter: dependencies.reportUnexpectedError,
+  });
 
   return async function POST(request: Request) {
     let currentUser: { id: string } | null;
@@ -64,7 +65,7 @@ export function createPresignedUploadRouteHandler(
     try {
       currentUser = await dependencies.resolveCurrentUser();
     } catch (error) {
-      reportUnexpectedError(error);
+      reportUnexpectedError(error, { stage: "resolve_current_user" });
       return errorResponse("UPLOAD_INITIALIZATION_FAILED", 500);
     }
 
@@ -103,11 +104,20 @@ export function createPresignedUploadRouteHandler(
         } catch (cleanupError) {
           reportUnexpectedError(
             new PendingUploadCleanupError(signingError, cleanupError),
+            {
+              stage: "compensating_delete",
+              sessionId: pendingUpload.sessionId,
+              videoId: pendingUpload.videoId,
+            },
           );
           return errorResponse("UPLOAD_INITIALIZATION_FAILED", 500);
         }
 
-        reportUnexpectedError(signingError);
+        reportUnexpectedError(signingError, {
+          stage: "sign_post",
+          sessionId: pendingUpload.sessionId,
+          videoId: pendingUpload.videoId,
+        });
         return errorResponse("UPLOAD_INITIALIZATION_FAILED", 500);
       }
 
@@ -133,7 +143,7 @@ export function createPresignedUploadRouteHandler(
         return errorResponse("TRICK_UNAVAILABLE", 400);
       }
 
-      reportUnexpectedError(error);
+      reportUnexpectedError(error, { stage: "initialize_upload" });
       return errorResponse("UPLOAD_INITIALIZATION_FAILED", 500);
     }
   };
