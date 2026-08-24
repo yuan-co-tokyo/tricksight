@@ -9,6 +9,7 @@ import {
   listActiveTricks,
   listPracticeSessions,
 } from "@/lib/db/queries";
+import { getHistoryCoverPresentation } from "@/lib/history-cover";
 import { cn } from "@/lib/utils";
 
 type HistoryPageProps = {
@@ -92,6 +93,48 @@ function AnalysisStatusBadge({ session }: { session: HistorySession }) {
     <Badge variant="outline" className={presentation.className}>
       {presentation.label}
     </Badge>
+  );
+}
+
+function HistoryVideoCover({ session }: { session: HistorySession }) {
+  const presentation = getHistoryCoverPresentation({
+    trickName: session.trick.name,
+    videoStatus: session.video?.status ?? null,
+  });
+
+  return (
+    <div
+      role="img"
+      aria-label={presentation.accessibleLabel}
+      className="relative isolate flex aspect-video overflow-hidden rounded-lg border border-primary/20 bg-card"
+    >
+      <span
+        aria-hidden="true"
+        className="absolute -top-12 -right-10 size-32 rounded-full bg-primary/10 blur-2xl"
+      />
+      <span
+        aria-hidden="true"
+        className="absolute -bottom-14 -left-8 size-28 rounded-full bg-muted blur-2xl"
+      />
+      <div className="relative flex min-w-0 flex-1 flex-col justify-between p-4">
+        <div className="flex items-start justify-between gap-3">
+          <span className="text-[0.65rem] font-semibold tracking-[0.2em] text-primary">
+            {presentation.eyebrow}
+          </span>
+          <span className="grid size-9 shrink-0 place-items-center rounded-full border border-primary/25 bg-primary/10 text-primary">
+            <VideoIcon aria-hidden="true" className="size-4" />
+          </span>
+        </div>
+        <div className="min-w-0">
+          <p className="truncate text-lg font-semibold text-foreground">
+            {session.trick.name}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {presentation.statusLabel}
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -220,13 +263,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
                 >
                   <Card className="transition-colors group-hover:bg-muted/30">
                     <CardContent className="grid gap-4 sm:grid-cols-[12rem_minmax(0,1fr)]">
-                      {/* TODO(T8-1): S3の期限付きURLと生成済みサムネイルへ置き換える。 */}
-                      <div className="grid aspect-video place-items-center overflow-hidden rounded-lg border border-border bg-muted text-muted-foreground">
-                        <span className="grid justify-items-center gap-2 text-xs">
-                          <VideoIcon aria-hidden="true" className="size-6" />
-                          サムネイル準備中
-                        </span>
-                      </div>
+                      <HistoryVideoCover session={session} />
 
                       <div className="min-w-0 space-y-4">
                         <div className="flex flex-wrap items-start justify-between gap-2">
