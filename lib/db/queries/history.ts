@@ -4,6 +4,7 @@ import { db } from "../index";
 
 import {
   assembleDashboardSummary,
+  assemblePracticeSessionPage,
   buildActiveTricksQuery,
   buildDashboardLatestAnalysisQuery,
   buildDashboardLatestCompletedAnalysisQuery,
@@ -23,7 +24,8 @@ export async function listPracticeSessions(
   userId: string,
   options: PracticeSessionListOptions = {},
 ) {
-  return buildPracticeSessionListQuery(db, userId, options);
+  const rows = await buildPracticeSessionListQuery(db, userId, options);
+  return assemblePracticeSessionPage(rows, options);
 }
 
 export async function getPracticeSessionDetail(

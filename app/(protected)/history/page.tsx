@@ -1,5 +1,12 @@
 import Link from "next/link";
-import { ArrowRightIcon, BarChart3Icon, VideoIcon } from "lucide-react";
+import { redirect } from "next/navigation";
+import {
+  ArrowRightIcon,
+  BarChart3Icon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  VideoIcon,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -15,10 +22,13 @@ import { cn } from "@/lib/utils";
 type HistoryPageProps = {
   searchParams: Promise<{
     trick?: string | string[];
+    page?: string | string[];
   }>;
 };
 
-type HistorySession = Awaited<ReturnType<typeof listPracticeSessions>>[number];
+type HistorySession = Awaited<
+  ReturnType<typeof listPracticeSessions>
+>["items"][number];
 type AnalysisStatus = NonNullable<
   HistorySession["latestAnalysis"]
 >["status"];
@@ -60,6 +70,26 @@ const practiceDateFormatter = new Intl.DateTimeFormat("ja-JP", {
 
 function firstSearchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function parseHistoryPage(value: string | undefined) {
+  if (!value || !/^[1-9]\d*$/.test(value)) return 1;
+
+  const page = Number(value);
+  return Number.isSafeInteger(page) ? page : 1;
+}
+
+function historyPageHref(input: {
+  trickSlug?: string;
+  page?: number;
+}) {
+  const params = new URLSearchParams();
+
+  if (input.trickSlug) params.set("trick", input.trickSlug);
+  if (input.page && input.page > 1) params.set("page", String(input.page));
+
+  const query = params.toString();
+  return query ? `/history?${query}` : "/history";
 }
 
 function getCompletedScore(session: HistorySession) {
@@ -180,17 +210,109 @@ function EmptyHistory({ filtered }: { filtered: boolean }) {
   );
 }
 
+function HistoryPagination({
+  page,
+  trickSlug,
+  hasPreviousPage,
+  hasNextPage,
+}: {
+  page: number;
+  trickSlug?: string;
+  hasPreviousPage: boolean;
+  hasNextPage: boolean;
+}) {
+  if (!hasPreviousPage && !hasNextPage) return null;
+
+  const navigationClassName =
+    "inline-flex min-h-11 min-w-0 items-center justify-center gap-1 rounded-lg border border-border px-3 text-sm font-medium transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none";
+
+  return (
+    <nav
+      aria-label="履歴のページ"
+      className="grid grid-cols-[1fr_auto_1fr] items-center gap-2"
+    >
+      {hasPreviousPage ? (
+        <Link
+          href={historyPageHref({ trickSlug, page: page - 1 })}
+          className={cn(navigationClassName, "justify-self-stretch hover:bg-muted")}
+        >
+          <ChevronLeftIcon aria-hidden="true" className="size-4" />
+          前へ
+        </Link>
+      ) : (
+        <span
+          aria-disabled="true"
+          className={cn(
+            navigationClassName,
+            "justify-self-stretch text-muted-foreground opacity-50",
+          )}
+        >
+          <ChevronLeftIcon aria-hidden="true" className="size-4" />
+          前へ
+        </span>
+      )}
+
+      <span
+        aria-current="page"
+        className="px-1 text-sm font-medium whitespace-nowrap text-muted-foreground"
+      >
+        {page}ページ
+      </span>
+
+      {hasNextPage ? (
+        <Link
+          href={historyPageHref({ trickSlug, page: page + 1 })}
+          className={cn(navigationClassName, "justify-self-stretch hover:bg-muted")}
+        >
+          次へ
+          <ChevronRightIcon aria-hidden="true" className="size-4" />
+        </Link>
+      ) : (
+        <span
+          aria-disabled="true"
+          className={cn(
+            navigationClassName,
+            "justify-self-stretch text-muted-foreground opacity-50",
+          )}
+        >
+          次へ
+          <ChevronRightIcon aria-hidden="true" className="size-4" />
+        </span>
+      )}
+    </nav>
+  );
+}
+
 export default async function HistoryPage({ searchParams }: HistoryPageProps) {
   const user = await requireCurrentUser();
+  const requestedParams = await searchParams;
   const activeTricks = await listActiveTricks(user.id);
-  const requestedTrick = firstSearchParam((await searchParams).trick);
+  const requestedTrick = firstSearchParam(requestedParams.trick);
+  const requestedPage = firstSearchParam(requestedParams.page);
   const selectedTrick = activeTricks.find(
     (trick) => trick.slug === requestedTrick,
   );
-  const sessions = await listPracticeSessions(
+  const page = parseHistoryPage(requestedPage);
+
+  if (
+    requestedPage !== undefined &&
+    (page === 1 || requestedPage !== String(page))
+  ) {
+    redirect(historyPageHref({ trickSlug: selectedTrick?.slug }));
+  }
+
+  const sessionPage = await listPracticeSessions(
     user.id,
-    selectedTrick ? { trickSlug: selectedTrick.slug } : {},
+    {
+      ...(selectedTrick ? { trickSlug: selectedTrick.slug } : {}),
+      page,
+    },
   );
+  const sessions = sessionPage.items;
+
+  if (page > 1 && sessions.length === 0) {
+    redirect(historyPageHref({ trickSlug: selectedTrick?.slug }));
+  }
 
   return (
     <section className="space-y-6">
@@ -198,7 +320,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
         <div className="flex flex-wrap items-end justify-between gap-2">
           <h1 className="text-2xl font-semibold tracking-tight">練習履歴</h1>
           <p className="text-sm text-muted-foreground">
-            {sessions.length}件
+            このページ {sessions.length}件
           </p>
         </div>
         <p className="text-muted-foreground">
@@ -210,7 +332,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
         <ul className="flex flex-wrap gap-2">
           <li>
             <Link
-              href="/history"
+              href={historyPageHref({})}
               aria-current={!selectedTrick ? "page" : undefined}
               className={cn(
                 "inline-flex min-h-9 items-center rounded-full border px-3 text-sm font-medium transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
@@ -228,7 +350,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
             return (
               <li key={trick.id}>
                 <Link
-                  href={{ pathname: "/history", query: { trick: trick.slug } }}
+                  href={historyPageHref({ trickSlug: trick.slug })}
                   aria-current={selected ? "page" : undefined}
                   className={cn(
                     "inline-flex min-h-9 items-center rounded-full border px-3 text-sm font-medium transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
@@ -248,80 +370,95 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
       {sessions.length === 0 ? (
         <EmptyHistory filtered={Boolean(selectedTrick)} />
       ) : (
-        <ul className="grid gap-4" aria-label="練習セッション一覧">
-          {sessions.map((session) => {
-            const outcome = outcomePresentation[session.userOutcome];
-            const completedScore = getCompletedScore(session);
+        <div className="space-y-4">
+          <ul className="grid gap-4" aria-label="練習セッション一覧">
+            {sessions.map((session) => {
+              const outcome = outcomePresentation[session.userOutcome];
+              const completedScore = getCompletedScore(session);
 
-            return (
-              <li key={session.id}>
-                <Link
-                  href={`/history/${session.id}`}
-                  prefetch={false}
-                  aria-label={`${session.trick.name} ${practiceDateFormatter.format(session.practicedAt)}の詳細を見る`}
-                  className="group block rounded-xl focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
-                >
-                  <Card className="transition-colors group-hover:bg-muted/30">
-                    <CardContent className="grid gap-4 sm:grid-cols-[12rem_minmax(0,1fr)]">
-                      <HistoryVideoCover session={session} />
+              return (
+                <li key={session.id}>
+                  <Link
+                    href={`/history/${session.id}`}
+                    prefetch={false}
+                    aria-label={`${session.trick.name} ${practiceDateFormatter.format(session.practicedAt)}の詳細を見る`}
+                    className="group block rounded-xl focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                  >
+                    <Card className="transition-colors group-hover:bg-muted/30">
+                      <CardContent className="grid gap-4 sm:grid-cols-[12rem_minmax(0,1fr)]">
+                        <HistoryVideoCover session={session} />
 
-                      <div className="min-w-0 space-y-4">
-                        <div className="flex flex-wrap items-start justify-between gap-2">
-                          <div className="min-w-0 space-y-1">
-                            <h2 className="truncate text-lg font-semibold">
-                              {session.trick.name}
-                            </h2>
-                            <p className="text-sm text-muted-foreground">
-                              {practiceDateFormatter.format(session.practicedAt)}
-                            </p>
+                        <div className="min-w-0 space-y-4">
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div className="min-w-0 space-y-1">
+                              <h2 className="truncate text-lg font-semibold">
+                                {session.trick.name}
+                              </h2>
+                              <p className="text-sm text-muted-foreground">
+                                {practiceDateFormatter.format(
+                                  session.practicedAt,
+                                )}
+                              </p>
+                            </div>
+                            <AnalysisStatusBadge session={session} />
                           </div>
-                          <AnalysisStatusBadge session={session} />
+
+                          <dl className="grid grid-cols-2 gap-3 rounded-lg border border-border bg-background/40 p-3">
+                            <div className="min-w-0 space-y-1">
+                              <dt className="text-xs text-muted-foreground">
+                                自己申告
+                              </dt>
+                              <dd
+                                className={cn("font-medium", outcome.className)}
+                              >
+                                {outcome.label}
+                              </dd>
+                            </div>
+                            <div className="min-w-0 space-y-1 border-l border-border pl-3">
+                              <dt className="text-xs text-muted-foreground">
+                                総合スコア
+                              </dt>
+                              <dd className="flex items-baseline gap-1 font-medium">
+                                {completedScore === null ? (
+                                  <span className="text-muted-foreground">—</span>
+                                ) : (
+                                  <>
+                                    <BarChart3Icon
+                                      aria-hidden="true"
+                                      className="size-4 text-success"
+                                    />
+                                    <span>{completedScore}</span>
+                                    <span className="text-xs font-normal text-muted-foreground">
+                                      / 100
+                                    </span>
+                                  </>
+                                )}
+                              </dd>
+                            </div>
+                          </dl>
+
+                          <span className="flex items-center justify-end gap-1 text-xs font-medium text-muted-foreground transition-colors group-hover:text-foreground">
+                            詳細を見る
+                            <ArrowRightIcon
+                              aria-hidden="true"
+                              className="size-3.5"
+                            />
+                          </span>
                         </div>
-
-                        <dl className="grid grid-cols-2 gap-3 rounded-lg border border-border bg-background/40 p-3">
-                          <div className="min-w-0 space-y-1">
-                            <dt className="text-xs text-muted-foreground">
-                              自己申告
-                            </dt>
-                            <dd className={cn("font-medium", outcome.className)}>
-                              {outcome.label}
-                            </dd>
-                          </div>
-                          <div className="min-w-0 space-y-1 border-l border-border pl-3">
-                            <dt className="text-xs text-muted-foreground">
-                              総合スコア
-                            </dt>
-                            <dd className="flex items-baseline gap-1 font-medium">
-                              {completedScore === null ? (
-                                <span className="text-muted-foreground">—</span>
-                              ) : (
-                                <>
-                                  <BarChart3Icon
-                                    aria-hidden="true"
-                                    className="size-4 text-success"
-                                  />
-                                  <span>{completedScore}</span>
-                                  <span className="text-xs font-normal text-muted-foreground">
-                                    / 100
-                                  </span>
-                                </>
-                              )}
-                            </dd>
-                          </div>
-                        </dl>
-
-                        <span className="flex items-center justify-end gap-1 text-xs font-medium text-muted-foreground transition-colors group-hover:text-foreground">
-                          詳細を見る
-                          <ArrowRightIcon aria-hidden="true" className="size-3.5" />
-                        </span>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
+                      </CardContent>
+                    </Card>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+          <HistoryPagination
+            page={sessionPage.page}
+            trickSlug={selectedTrick?.slug}
+            hasPreviousPage={sessionPage.hasPreviousPage}
+            hasNextPage={sessionPage.hasNextPage}
+          />
+        </div>
       )}
     </section>
   );

@@ -14,7 +14,49 @@ export type HistoryDatabase = NodePgDatabase<typeof schema>;
 
 export type PracticeSessionListOptions = {
   trickSlug?: string;
+  page?: number;
+  pageSize?: number;
 };
+
+export const DEFAULT_HISTORY_PAGE_SIZE = 8;
+export const MAX_HISTORY_PAGE_SIZE = 50;
+
+export function resolvePracticeSessionPagination(
+  options: PracticeSessionListOptions = {},
+) {
+  const page = options.page ?? 1;
+  const pageSize = options.pageSize ?? DEFAULT_HISTORY_PAGE_SIZE;
+
+  if (!Number.isSafeInteger(page) || page < 1) {
+    throw new Error("page must be a positive integer.");
+  }
+  if (
+    !Number.isSafeInteger(pageSize) ||
+    pageSize < 1 ||
+    pageSize > MAX_HISTORY_PAGE_SIZE
+  ) {
+    throw new Error(
+      `pageSize must be an integer between 1 and ${MAX_HISTORY_PAGE_SIZE}.`,
+    );
+  }
+
+  return { page, pageSize };
+}
+
+export function assemblePracticeSessionPage<T>(
+  rows: readonly T[],
+  options: PracticeSessionListOptions = {},
+) {
+  const { page, pageSize } = resolvePracticeSessionPagination(options);
+
+  return {
+    items: rows.slice(0, pageSize),
+    page,
+    pageSize,
+    hasPreviousPage: page > 1,
+    hasNextPage: rows.length > pageSize,
+  };
+}
 
 export type DashboardQueryOptions = {
   recentVideoLimit?: number;
@@ -98,6 +140,7 @@ export function buildPracticeSessionListQuery(
 ) {
   const latestAnalysis = buildLatestOwnedAnalysisSubquery(database, userId);
   const filters = [ownerScope(userId)];
+  const { page, pageSize } = resolvePracticeSessionPagination(options);
 
   if (options.trickSlug) {
     filters.push(eq(tricks.slug, options.trickSlug));
@@ -145,7 +188,10 @@ export function buildPracticeSessionListQuery(
       ),
     )
     .where(and(...filters))
-    .orderBy(desc(practiceSessions.practicedAt), desc(practiceSessions.id));
+    .orderBy(desc(practiceSessions.practicedAt), desc(practiceSessions.id))
+    // 1件余分に取得し、総件数専用クエリなしで「次へ」を判定する。
+    .limit(pageSize + 1)
+    .offset((page - 1) * pageSize);
 }
 
 export function buildPracticeSessionDetailQuery(

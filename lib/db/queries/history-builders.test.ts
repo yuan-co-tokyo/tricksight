@@ -4,6 +4,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import * as schema from "../schema";
 
 import {
+  assemblePracticeSessionPage,
   assembleDashboardSummary,
   buildActiveTricksQuery,
   buildDashboardLatestAnalysisQuery,
@@ -12,6 +13,7 @@ import {
   buildDashboardTrickCountsQuery,
   buildPracticeSessionDetailQuery,
   buildPracticeSessionListQuery,
+  DEFAULT_HISTORY_PAGE_SIZE,
 } from "./history-builders";
 
 const database = drizzle.mock({ schema });
@@ -85,6 +87,74 @@ describe("history query builders", () => {
     );
     expect(query.params.filter((value) => value === userId)).toHaveLength(2);
     expect(query.params).toContain("kickflip");
+  });
+
+  it("applies page limit and offset without bypassing owner scope", () => {
+    const userId = "paged-user";
+    const query = buildPracticeSessionListQuery(database, userId, {
+      trickSlug: "ollie",
+      page: 3,
+      pageSize: 8,
+    }).toSQL();
+    const sql = compactSql(query.sql);
+
+    expectOwnerScoped({ ...query, userId });
+    expect(sql).toMatch(/limit \$\d+ offset \$\d+$/);
+    expect(query.params).toContain(9);
+    expect(query.params).toContain(16);
+    expect(query.params).toContain("ollie");
+  });
+
+  it("rejects unsafe page boundaries before building a query", () => {
+    expect(() =>
+      buildPracticeSessionListQuery(database, "user-a", { page: 0 }),
+    ).toThrow("page must be a positive integer");
+    expect(() =>
+      buildPracticeSessionListQuery(database, "user-a", { page: 1.5 }),
+    ).toThrow("page must be a positive integer");
+    expect(() =>
+      buildPracticeSessionListQuery(database, "user-a", { pageSize: 51 }),
+    ).toThrow("pageSize must be an integer between");
+  });
+
+  it("assembles empty, single-page, next-page, and final-page boundaries", () => {
+    expect(assemblePracticeSessionPage([])).toEqual({
+      items: [],
+      page: 1,
+      pageSize: DEFAULT_HISTORY_PAGE_SIZE,
+      hasPreviousPage: false,
+      hasNextPage: false,
+    });
+
+    const onePageRows = Array.from(
+      { length: DEFAULT_HISTORY_PAGE_SIZE },
+      (_, index) => index,
+    );
+    expect(assemblePracticeSessionPage(onePageRows)).toMatchObject({
+      items: onePageRows,
+      hasPreviousPage: false,
+      hasNextPage: false,
+    });
+
+    const rowsWithNext = [...onePageRows, DEFAULT_HISTORY_PAGE_SIZE];
+    expect(assemblePracticeSessionPage(rowsWithNext)).toMatchObject({
+      items: onePageRows,
+      hasPreviousPage: false,
+      hasNextPage: true,
+    });
+
+    expect(
+      assemblePracticeSessionPage(["final-a", "final-b"], {
+        page: 2,
+        pageSize: DEFAULT_HISTORY_PAGE_SIZE,
+      }),
+    ).toEqual({
+      items: ["final-a", "final-b"],
+      page: 2,
+      pageSize: DEFAULT_HISTORY_PAGE_SIZE,
+      hasPreviousPage: true,
+      hasNextPage: false,
+    });
   });
 
   it("returns no row for another user's session because owner and session ID share one WHERE", () => {
