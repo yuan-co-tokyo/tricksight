@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AWS_STS_OIDC_AUDIENCE,
   createAwsClientConfig,
+  resolveAwsAccountId,
 } from "./client-config";
 
 describe("createAwsClientConfig", () => {
@@ -83,5 +84,22 @@ describe("createAwsClientConfig", () => {
       region: "ap-northeast-2",
       credentials: oidcCredentialsProvider,
     });
+  });
+});
+
+describe("resolveAwsAccountId", () => {
+  it("12桁のAWSアカウントIDをtrimして返す", () => {
+    expect(resolveAwsAccountId({ AWS_ACCOUNT_ID: " 123456789012 " })).toBe(
+      "123456789012",
+    );
+  });
+
+  it("未設定または12桁でない値を拒否する", () => {
+    expect(() => resolveAwsAccountId({})).toThrow(
+      "AWS_ACCOUNT_ID is required",
+    );
+    expect(() =>
+      resolveAwsAccountId({ AWS_ACCOUNT_ID: "123" }),
+    ).toThrow("must be a 12-digit AWS account ID");
   });
 });

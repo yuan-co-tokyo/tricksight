@@ -10,6 +10,19 @@ type OidcCredentialsProviderFactory = (
   input: AwsCredentialsProviderInit,
 ) => ReturnType<typeof awsCredentialsProvider>;
 
+export function resolveAwsAccountId(
+  environment: Environment = process.env,
+) {
+  const accountId = environment.AWS_ACCOUNT_ID?.trim();
+
+  if (!accountId) throw new Error("AWS_ACCOUNT_ID is required.");
+  if (!/^\d{12}$/.test(accountId)) {
+    throw new Error("AWS_ACCOUNT_ID must be a 12-digit AWS account ID.");
+  }
+
+  return accountId;
+}
+
 export function createAwsClientConfig(input: {
   region: string;
   environment?: Environment;
