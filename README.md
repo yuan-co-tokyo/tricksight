@@ -44,6 +44,8 @@ pnpm db:setup-role
 
 セットアップ後、`DATABASE_URL`のユーザー名をTransaction pooler用の`tricksight_app.<project-ref>`、パスワードを`APP_DB_PASSWORD`と同じ値にします。`DATABASE_ADMIN_URL`は管理用`postgres`ロールのまま変更しません。アプリ用ロールには既存・将来のpublicテーブルへのSELECT/INSERT/UPDATE/DELETEとシーケンス利用だけを付与し、DDL権限は付与しません。
 
+public スキーマは `anon` / `authenticated` の現在・既定権限を剥奪し、全テーブルでRLSを有効にします。アプリ専用ロールには `ownerScope` を所有者境界として全行DMLポリシーを設定します。既存環境へパスワード変更なしでセキュリティ設定だけを適用する手順と、Supabase Data API を無効化する運用は [Database security](docs/database-security.md) を参照してください。
+
 > **ロール再設定時の注意:** `pnpm db:setup-role`は同じパスワードを再適用した場合もSCRAM verifierを作り直すため、Supavisor（Transaction pooler）の認証キャッシュが一時的に不整合になることがあります。
 > 直後に`password authentication failed`が出た場合は、少し待って再接続してください。実測では数十秒以内、1回の再試行で回復しました。
 > 本番稼働後は、一時的な接続失敗を許容できるタイミングで実行してください。
@@ -53,8 +55,13 @@ pnpm db:setup-role
 pnpm db:check
 pnpm db:migrate
 pnpm db:seed
+pnpm db:secure -- --apply
 pnpm db:verify
 ```
+
+RLS適用後にランタイム権限エラーが発生した場合の緊急切り戻しは
+`pnpm db:secure -- --rollback-rls`、復旧確認は `pnpm db:verify-runtime` を使います。
+通常の検証ではセキュリティ設定も確認する `pnpm db:verify` を使ってください。
 
 スキーマを変更した場合は、適用前にSQLと整合性を確認します。
 
@@ -68,6 +75,7 @@ Supabaseの停止を避けるGitHub Actionsを使う場合は、Repository secre
 ## 設計書
 
 - [MVP実装方針](docs/mvp-implementation-plan.md)
+- [Database security](docs/database-security.md)
 - [AWSセットアップ手順](docs/aws-iam-setup.md)
 
 ## 環境変数

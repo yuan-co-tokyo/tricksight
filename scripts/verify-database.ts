@@ -5,23 +5,19 @@ import { Pool } from "pg";
 
 import { db, pool as runtimePool } from "@/lib/db";
 import {
+  expectedPublicTables,
+  verifyPublicSchemaSecurity,
+} from "@/lib/db/public-schema-security";
+import {
+  account,
   analyses,
   practiceSessions,
+  session as authSession,
   tricks,
   user,
+  verification,
   videos,
 } from "@/lib/db/schema";
-
-const expectedTables = [
-  "account",
-  "analyses",
-  "session",
-  "sessions",
-  "tricks",
-  "user",
-  "verification",
-  "videos",
-] as const;
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -91,10 +87,10 @@ async function verifyConnection(input: {
          from information_schema.tables
          where table_schema = 'public' and table_name = any($1::text[])
          order by table_name`,
-        [expectedTables],
+        [expectedPublicTables],
       );
       const found = new Set(result.rows.map((row) => row.table_name));
-      const missing = expectedTables.filter((table) => !found.has(table));
+      const missing = expectedPublicTables.filter((table) => !found.has(table));
 
       if (missing.length > 0) {
         throw new Error(`Missing database tables: ${missing.join(", ")}`);
@@ -109,43 +105,92 @@ async function verifyConnection(input: {
   }
 }
 
+async function verifyAdminSecurity(connectionString: string, appRole: string) {
+  const pool = new Pool({
+    connectionString,
+    connectionTimeoutMillis: 10_000,
+    max: 1,
+  });
+
+  try {
+    const client = await pool.connect();
+
+    try {
+      const securedTables = await verifyPublicSchemaSecurity(client, appRole);
+
+      console.log(
+        `RLS and app-role policies verified on ${securedTables.length} public table(s).`,
+      );
+      console.log(
+        "anon/authenticated current and default table privileges verified as absent.",
+      );
+    } finally {
+      client.release();
+    }
+  } finally {
+    await pool.end();
+  }
+}
+
 async function verifyRuntimeDrizzleCrudAndTransaction() {
   const verificationId = randomUUID();
+  const now = new Date();
   const ids = {
     user: `db-verify-${verificationId}`,
-    session: randomUUID(),
+    authSession: `db-verify-session-${verificationId}`,
+    account: `db-verify-account-${verificationId}`,
+    verification: `db-verify-verification-${verificationId}`,
+    trick: randomUUID(),
+    practiceSession: randomUUID(),
     video: randomUUID(),
     analysis: randomUUID(),
-    deletedAnalysis: randomUUID(),
   };
   const rollbackSignal = new Error("ROLLBACK_DATABASE_VERIFICATION");
 
   try {
     await db.transaction(async (tx) => {
-      const [selectedTrick] = await tx
-        .select({ id: tricks.id })
-        .from(tricks)
-        .limit(1);
-
-      assert(selectedTrick, "No seeded trick is available for CRUD verification.");
-
       await tx.insert(user).values({
         id: ids.user,
         display_name: "Database verification user",
         email: `${ids.user}@example.invalid`,
         emailVerified: true,
       });
-      await tx.insert(practiceSessions).values({
-        id: ids.session,
+      await tx.insert(tricks).values({
+        id: ids.trick,
+        slug: `db-verify-${verificationId}`,
+        name: "Database verification trick",
+      });
+      await tx.insert(authSession).values({
+        id: ids.authSession,
+        expiresAt: new Date(now.getTime() + 60_000),
+        token: `db-verify-token-${verificationId}`,
+        updatedAt: now,
         userId: ids.user,
-        trickId: selectedTrick.id,
+      });
+      await tx.insert(account).values({
+        id: ids.account,
+        accountId: ids.user,
+        providerId: "credential",
+        userId: ids.user,
+        updatedAt: now,
+      });
+      await tx.insert(verification).values({
+        id: ids.verification,
+        identifier: `${ids.user}@example.invalid`,
+        value: "database-verification",
+        expiresAt: new Date(now.getTime() + 60_000),
+      });
+      await tx.insert(practiceSessions).values({
+        id: ids.practiceSession,
+        userId: ids.user,
+        trickId: ids.trick,
         cameraAngle: "SIDE",
         userOutcome: "UNCLEAR",
         memo: "Database verification session",
       });
       await tx.insert(videos).values({
         id: ids.video,
-        sessionId: ids.session,
+        sessionId: ids.practiceSession,
         s3Key: `database-verification/${verificationId}.mp4`,
         originalFilename: "database-verification.mp4",
         contentType: "video/mp4",
@@ -155,84 +200,181 @@ async function verifyRuntimeDrizzleCrudAndTransaction() {
         height: 1,
         status: "UPLOADED",
       });
-      await tx.insert(analyses).values([
-        {
-          id: ids.analysis,
-          videoId: ids.video,
-          provider: "database-verification",
-          modelId: "database-verification",
-          promptVersion: "database-verification",
-        },
-        {
-          id: ids.deletedAnalysis,
-          videoId: ids.video,
-          provider: "database-verification-delete",
-          modelId: "database-verification",
-          promptVersion: "database-verification",
-        },
-      ]);
+      await tx.insert(analyses).values({
+        id: ids.analysis,
+        videoId: ids.video,
+        provider: "database-verification",
+        modelId: "database-verification",
+        promptVersion: "database-verification",
+      });
 
-      const [insertedGraph] = await tx
-        .select({
-          userId: user.id,
-          sessionId: practiceSessions.id,
-          videoId: videos.id,
-          analysisId: analyses.id,
-        })
-        .from(user)
-        .innerJoin(practiceSessions, eq(practiceSessions.userId, user.id))
-        .innerJoin(videos, eq(videos.sessionId, practiceSessions.id))
-        .innerJoin(analyses, eq(analyses.videoId, videos.id))
-        .where(eq(analyses.id, ids.analysis));
-
-      assert(
-        insertedGraph?.userId === ids.user &&
-          insertedGraph.sessionId === ids.session &&
-          insertedGraph.videoId === ids.video &&
-          insertedGraph.analysisId === ids.analysis,
-        "Drizzle could not read the inserted verification graph.",
+      const selectedRows: Array<Array<{ id: string }>> = [];
+      selectedRows.push(
+        await tx.select({ id: user.id }).from(user).where(eq(user.id, ids.user)),
+      );
+      selectedRows.push(
+        await tx
+          .select({ id: authSession.id })
+          .from(authSession)
+          .where(eq(authSession.id, ids.authSession)),
+      );
+      selectedRows.push(
+        await tx
+          .select({ id: account.id })
+          .from(account)
+          .where(eq(account.id, ids.account)),
+      );
+      selectedRows.push(
+        await tx
+          .select({ id: verification.id })
+          .from(verification)
+          .where(eq(verification.id, ids.verification)),
+      );
+      selectedRows.push(
+        await tx
+          .select({ id: tricks.id })
+          .from(tricks)
+          .where(eq(tricks.id, ids.trick)),
+      );
+      selectedRows.push(
+        await tx
+          .select({ id: practiceSessions.id })
+          .from(practiceSessions)
+          .where(eq(practiceSessions.id, ids.practiceSession)),
+      );
+      selectedRows.push(
+        await tx
+          .select({ id: videos.id })
+          .from(videos)
+          .where(eq(videos.id, ids.video)),
+      );
+      selectedRows.push(
+        await tx
+          .select({ id: analyses.id })
+          .from(analyses)
+          .where(eq(analyses.id, ids.analysis)),
       );
 
-      const [updatedUser] = await tx
-        .update(user)
-        .set({ display_name: "Updated database verification user" })
-        .where(eq(user.id, ids.user))
-        .returning({ id: user.id });
-      const [updatedSession] = await tx
-        .update(practiceSessions)
-        .set({ memo: "Updated database verification session" })
-        .where(eq(practiceSessions.id, ids.session))
-        .returning({ id: practiceSessions.id });
-      const [updatedVideo] = await tx
-        .update(videos)
-        .set({ status: "READY" })
-        .where(eq(videos.id, ids.video))
-        .returning({ id: videos.id });
-      const [updatedAnalysis] = await tx
-        .update(analyses)
-        .set({ status: "ANALYZING", attemptCount: 1 })
-        .where(eq(analyses.id, ids.analysis))
-        .returning({ id: analyses.id });
-
-      assert(updatedUser?.id === ids.user, "Drizzle could not update the user.");
       assert(
-        updatedSession?.id === ids.session,
-        "Drizzle could not update the practice session.",
-      );
-      assert(updatedVideo?.id === ids.video, "Drizzle could not update the video.");
-      assert(
-        updatedAnalysis?.id === ids.analysis,
-        "Drizzle could not update the analysis.",
+        selectedRows.every((rows) => rows.length === 1),
+        "Drizzle could not read every inserted verification row.",
       );
 
-      const [deletedAnalysis] = await tx
-        .delete(analyses)
-        .where(eq(analyses.id, ids.deletedAnalysis))
-        .returning({ id: analyses.id });
+      const updatedRows: Array<Array<{ id: string }>> = [];
+      updatedRows.push(
+        await tx
+          .update(user)
+          .set({ display_name: "Updated database verification user" })
+          .where(eq(user.id, ids.user))
+          .returning({ id: user.id }),
+      );
+      updatedRows.push(
+        await tx
+          .update(authSession)
+          .set({ userAgent: "database-verification" })
+          .where(eq(authSession.id, ids.authSession))
+          .returning({ id: authSession.id }),
+      );
+      updatedRows.push(
+        await tx
+          .update(account)
+          .set({ scope: "database-verification" })
+          .where(eq(account.id, ids.account))
+          .returning({ id: account.id }),
+      );
+      updatedRows.push(
+        await tx
+          .update(verification)
+          .set({ value: "updated-database-verification" })
+          .where(eq(verification.id, ids.verification))
+          .returning({ id: verification.id }),
+      );
+      updatedRows.push(
+        await tx
+          .update(tricks)
+          .set({ description: "Updated database verification trick" })
+          .where(eq(tricks.id, ids.trick))
+          .returning({ id: tricks.id }),
+      );
+      updatedRows.push(
+        await tx
+          .update(practiceSessions)
+          .set({ memo: "Updated database verification session" })
+          .where(eq(practiceSessions.id, ids.practiceSession))
+          .returning({ id: practiceSessions.id }),
+      );
+      updatedRows.push(
+        await tx
+          .update(videos)
+          .set({ status: "READY" })
+          .where(eq(videos.id, ids.video))
+          .returning({ id: videos.id }),
+      );
+      updatedRows.push(
+        await tx
+          .update(analyses)
+          .set({ status: "ANALYZING", attemptCount: 1 })
+          .where(eq(analyses.id, ids.analysis))
+          .returning({ id: analyses.id }),
+      );
 
       assert(
-        deletedAnalysis?.id === ids.deletedAnalysis,
-        "Drizzle could not delete the verification analysis.",
+        updatedRows.every((rows) => rows.length === 1),
+        "Drizzle could not update every verification row.",
+      );
+
+      const deletedRows: Array<Array<{ id: string }>> = [];
+      deletedRows.push(
+        await tx
+          .delete(analyses)
+          .where(eq(analyses.id, ids.analysis))
+          .returning({ id: analyses.id }),
+      );
+      deletedRows.push(
+        await tx
+          .delete(videos)
+          .where(eq(videos.id, ids.video))
+          .returning({ id: videos.id }),
+      );
+      deletedRows.push(
+        await tx
+          .delete(practiceSessions)
+          .where(eq(practiceSessions.id, ids.practiceSession))
+          .returning({ id: practiceSessions.id }),
+      );
+      deletedRows.push(
+        await tx
+          .delete(authSession)
+          .where(eq(authSession.id, ids.authSession))
+          .returning({ id: authSession.id }),
+      );
+      deletedRows.push(
+        await tx
+          .delete(account)
+          .where(eq(account.id, ids.account))
+          .returning({ id: account.id }),
+      );
+      deletedRows.push(
+        await tx
+          .delete(verification)
+          .where(eq(verification.id, ids.verification))
+          .returning({ id: verification.id }),
+      );
+      deletedRows.push(
+        await tx
+          .delete(tricks)
+          .where(eq(tricks.id, ids.trick))
+          .returning({ id: tricks.id }),
+      );
+      deletedRows.push(
+        await tx
+          .delete(user)
+          .where(eq(user.id, ids.user))
+          .returning({ id: user.id }),
+      );
+      assert(
+        deletedRows.every((rows) => rows.length === 1),
+        "Drizzle could not delete every verification row.",
       );
 
       throw rollbackSignal;
@@ -243,29 +385,61 @@ async function verifyRuntimeDrizzleCrudAndTransaction() {
     }
   }
 
-  const remainingRows = await Promise.all([
-    db.select({ id: user.id }).from(user).where(eq(user.id, ids.user)),
-    db
+  const remainingRows: Array<Array<{ id: string }>> = [];
+  remainingRows.push(
+    await db.select({ id: user.id }).from(user).where(eq(user.id, ids.user)),
+  );
+  remainingRows.push(
+    await db
+      .select({ id: authSession.id })
+      .from(authSession)
+      .where(eq(authSession.id, ids.authSession)),
+  );
+  remainingRows.push(
+    await db
+      .select({ id: account.id })
+      .from(account)
+      .where(eq(account.id, ids.account)),
+  );
+  remainingRows.push(
+    await db
+      .select({ id: verification.id })
+      .from(verification)
+      .where(eq(verification.id, ids.verification)),
+  );
+  remainingRows.push(
+    await db
+      .select({ id: tricks.id })
+      .from(tricks)
+      .where(eq(tricks.id, ids.trick)),
+  );
+  remainingRows.push(
+    await db
       .select({ id: practiceSessions.id })
       .from(practiceSessions)
-      .where(eq(practiceSessions.id, ids.session)),
-    db.select({ id: videos.id }).from(videos).where(eq(videos.id, ids.video)),
-    db
+      .where(eq(practiceSessions.id, ids.practiceSession)),
+  );
+  remainingRows.push(
+    await db
+      .select({ id: videos.id })
+      .from(videos)
+      .where(eq(videos.id, ids.video)),
+  );
+  remainingRows.push(
+    await db
       .select({ id: analyses.id })
       .from(analyses)
       .where(eq(analyses.id, ids.analysis)),
-    db
-      .select({ id: analyses.id })
-      .from(analyses)
-      .where(eq(analyses.id, ids.deletedAnalysis)),
-  ]);
+  );
 
   assert(
     remainingRows.every((rows) => rows.length === 0),
     "Transaction rollback left verification data in the database.",
   );
 
-  console.log("Runtime Drizzle CRUD verified without named prepared statements.");
+  console.log(
+    "Runtime Drizzle CRUD verified on all 8 public tables without named prepared statements.",
+  );
   console.log("Runtime transaction rollback verified; no verification data remains.");
 }
 
@@ -313,26 +487,34 @@ async function verifyRuntimeRoleAndDdl(appRole: string) {
 
 async function main() {
   const runtimeUrl = requiredEnvironment("DATABASE_URL");
-  const adminUrl = requiredEnvironment("DATABASE_ADMIN_URL");
   const appRole = requiredEnvironment("APP_DB_ROLE");
+  const runtimeOnly = process.argv.includes("--runtime-only");
 
   validateConnectionPurpose({
     name: "DATABASE_URL",
     url: runtimeUrl,
     expectedPort: "6543",
   });
-  validateConnectionPurpose({
-    name: "DATABASE_ADMIN_URL",
-    url: adminUrl,
-    expectedPort: "5432",
-  });
+  const adminUrl = runtimeOnly
+    ? undefined
+    : requiredEnvironment("DATABASE_ADMIN_URL");
+
+  if (adminUrl) {
+    validateConnectionPurpose({
+      name: "DATABASE_ADMIN_URL",
+      url: adminUrl,
+      expectedPort: "5432",
+    });
+  }
 
   try {
-    await verifyConnection({
-      label: "Admin/direct",
-      connectionString: adminUrl,
-      verifySchema: true,
-    });
+    if (adminUrl) {
+      await verifyConnection({
+        label: "Admin/direct",
+        connectionString: adminUrl,
+        verifySchema: true,
+      });
+    }
     await verifyConnection({
       label: "Runtime/transaction-pooler",
       connectionString: runtimeUrl,
@@ -340,6 +522,10 @@ async function main() {
     });
     await verifyRuntimeRoleAndDdl(appRole);
     await verifyRuntimeDrizzleCrudAndTransaction();
+
+    if (adminUrl) {
+      await verifyAdminSecurity(adminUrl, appRole);
+    }
   } finally {
     await runtimePool.end();
   }

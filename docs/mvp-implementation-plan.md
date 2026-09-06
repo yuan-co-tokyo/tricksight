@@ -122,6 +122,8 @@ Transaction poolerではnamed prepared statementを使えないため、`pg`の�
 
 Supabaseは「東京にあるマネージドPostgres」としてのみ使う。Supabase AuthとSupabase Storageは使わない。認証はBetter Authでアプリ内に持ち、動画はS3へ置く。これによりDBは`pg_dump`だけでRDSへ移せる状態を保つ。
 
+Supabase Data API は利用しない。public の `anon` / `authenticated` 権限を現在・既定の両方で剥奪し、全テーブルのRLSと `tricksight_app` 専用ポリシーを同一トランザクションで管理する。`REVOKE` とRLSを併用し、既定権限の再付与や運用ミスにも一方の境界が残るようにする。詳細と適用手順は [Database security](database-security.md) を参照する。
+
 Supabase Freeは1週間の無活動でプロジェクトが停止し、復帰にはStudioからの手動操作が必要になる。これを避けるため、GitHub Actionsのスケジュール実行で日次のkeep-aliveクエリを流す。Vercel Cronは使わない（移植性のため）。
 
 ### DBの選定理由と見直し条件

@@ -39,6 +39,12 @@ Supabase の `postgres` ロールは **superuser ではない**（`rolsuper=fals
 
 `pnpm db:verify` は6項目すべて成功する。
 
+### public スキーマのData API防御（2026-08-27）
+
+Supabase既定権限により `anon` / `authenticated` がpublic全8テーブルへDML可能で、RLSも未設定だったため、[Database security](database-security.md) の多層防御を追加した。現在権限と `postgres` の既定権限を `REVOKE` し、同一トランザクションで全テーブルのRLSと `tricksight_app` 専用ポリシーを設定する。`db:verify` は権限・既定権限・RLS・ポリシー・Transaction pooler経由の全8テーブルCRUDを検証する。
+
+2026-08-27に本番へ適用し、DB側で `anon` / `authenticated` のテーブル権限0件、RLS 8件、`tricksight_app_full_access` 8件、`service_role` のCRUD維持8テーブルを実測した。別のTransaction pooler接続による全8テーブルCRUDとrollbackも成功し、依頼者データ件数（user 1 / account 1 / session 2 / sessions 2 / videos 2 / tricks 3）は適用前後で不変だった。
+
 - T0-7 意味のある単位で9コミットに分割し `main` へ push
 - keep-alive の有効化（ワークフローをpush、Secret設定、手動実行で疎通確認）
 

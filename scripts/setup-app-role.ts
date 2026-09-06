@@ -1,5 +1,7 @@
 import { Pool, type PoolClient } from "pg";
 
+import { configurePublicSchemaSecurity } from "@/lib/db/public-schema-security";
+
 function requiredEnvironment(name: string) {
   const value = process.env[name];
 
@@ -126,10 +128,14 @@ async function main() {
     try {
       await client.query("begin");
       const action = await configureRole(client, appRole, appPassword);
+      const securedTables = await configurePublicSchemaSecurity(client, appRole);
       await client.query("commit");
       console.log(`App database role ${action}: ${appRole}.`);
       console.log("Granted DML on public tables and usage on public sequences.");
       console.log("Configured matching default privileges for future migrations.");
+      console.log(
+        `Secured ${securedTables.length} public table(s) with revoked Data API privileges and RLS.`,
+      );
       console.log("DDL and elevated role attributes were not granted.");
     } catch (error) {
       await client.query("rollback");
