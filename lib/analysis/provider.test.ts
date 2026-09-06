@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   formatVideoAnalysisErrorDetails,
+  sanitizeVideoAnalysisErrorText,
   sanitizeVideoAnalysisRawResponse,
 } from "./provider";
 
@@ -43,5 +44,14 @@ describe("provider error detail sanitization", () => {
     expect(JSON.stringify(rawResponse)).not.toContain("tlk_raw-secret");
     expect(JSON.stringify(rawResponse)).not.toContain("raw-bearer-secret");
     expect(JSON.stringify(rawResponse)).not.toContain("aws-session-secret");
+  });
+
+  it("keeps parser diagnostics that use token as an ordinary word", () => {
+    const message = "Unexpected token '`', JSON is invalid";
+
+    expect(sanitizeVideoAnalysisErrorText(message)).toBe(message);
+    expect(
+      sanitizeVideoAnalysisErrorText("token=private-value"),
+    ).toBe("token=[REDACTED]");
   });
 });

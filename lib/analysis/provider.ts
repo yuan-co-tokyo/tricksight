@@ -1,5 +1,9 @@
 import type { cameraAngleEnum } from "@/lib/db/schema/app";
-import type { SupportedTrickSlug } from "@/prompts/common-system-v2";
+import {
+  appendVideoContext,
+  getPromptForTrick,
+  type SupportedTrickSlug,
+} from "../../prompts/common-system-v2";
 
 import type { SkateAnalysisResult } from "./schema";
 
@@ -39,6 +43,32 @@ export interface VideoAnalysisProvider {
   analyze(input: VideoAnalysisInput): Promise<VideoAnalysisOutput>;
 }
 
+export function parseVideoS3Uri(uri: string): { bucket: string; key: string } {
+  const match = /^s3:\/\/([^/]+)\/(.+)$/.exec(uri);
+  if (!match) {
+    throw new VideoAnalysisError(
+      "INVALID_S3_URI",
+      `S3 URIの形式が不正です: ${uri}`,
+    );
+  }
+
+  return { bucket: match[1], key: match[2] };
+}
+
+export function resolveVideoAnalysisPrompt(
+  input: Pick<VideoAnalysisInput, "trick" | "stance" | "cameraAngle">,
+) {
+  const resolvedPrompt = getPromptForTrick(input.trick);
+
+  return {
+    prompt: appendVideoContext(resolvedPrompt.prompt, {
+      stance: input.stance,
+      cameraAngle: input.cameraAngle,
+    }),
+    version: resolvedPrompt.version,
+  };
+}
+
 const SENSITIVE_KEY_PATTERN =
   /authorization|cookie|credential|password|secret|signature|api[-_]?key|access[-_]?key|(?:auth|id|session|access|refresh|security)[-_]?token|^token$/i;
 
@@ -52,7 +82,7 @@ export function sanitizeVideoAnalysisErrorText(value: string): string {
       "$1[REDACTED]",
     )
     .replace(
-      /((?:authorization|x-api-key|api[-_]?key|password|secret|token|credential|signature)["'\s:=]+)[^\s,;}"']+/gi,
+      /((?:authorization|x-api-key|api[-_]?key|password|secret|token|credential|signature)["']?\s*[:=]\s*["']?)[^\s,;}"']+/gi,
       "$1[REDACTED]",
     );
 }

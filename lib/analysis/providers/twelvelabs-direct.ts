@@ -3,15 +3,13 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { TwelveLabs, type TwelvelabsApi } from "twelvelabs-js";
 
 import { createAwsClientConfig } from "../../aws/client-config";
-import {
-  appendVideoContext,
-  getPromptForTrick,
-  promptVersionFamily,
-} from "../../../prompts/common-system-v2";
+import { promptVersionFamily } from "../../../prompts/common-system-v2";
 
 import {
   UnsupportedPromptVersionError,
   VideoAnalysisError,
+  parseVideoS3Uri,
+  resolveVideoAnalysisPrompt,
   type PromptVersionFamily,
   type VideoAnalysisInput,
   type VideoAnalysisOutput,
@@ -113,18 +111,6 @@ function resolveConfig(
   };
 }
 
-function parseS3Uri(uri: string): { bucket: string; key: string } {
-  const match = /^s3:\/\/([^/]+)\/(.+)$/.exec(uri);
-  if (!match) {
-    throw new VideoAnalysisError(
-      "INVALID_S3_URI",
-      `S3 URIの形式が不正です: ${uri}`,
-    );
-  }
-
-  return { bucket: match[1], key: match[2] };
-}
-
 function stringifyUnknown(value: unknown): string {
   if (value instanceof Error) {
     return value.message;
@@ -165,7 +151,7 @@ export class TwelveLabsDirectVideoAnalyzer implements VideoAnalysisProvider {
       throw new UnsupportedPromptVersionError(input.promptVersion);
     }
 
-    const { bucket, key } = parseS3Uri(input.videoS3Uri);
+    const { bucket, key } = parseVideoS3Uri(input.videoS3Uri);
     if (bucket !== this.config.s3Bucket) {
       throw new VideoAnalysisError(
         "BUCKET_MISMATCH",
@@ -177,11 +163,8 @@ export class TwelveLabsDirectVideoAnalyzer implements VideoAnalysisProvider {
     const assetId = await this.createAsset(url);
     await this.waitForAsset(assetId);
 
-    const resolvedPrompt = getPromptForTrick(input.trick);
-    const analysisPrompt = appendVideoContext(resolvedPrompt.prompt, {
-      stance: input.stance,
-      cameraAngle: input.cameraAngle,
-    });
+    const resolvedPrompt = resolveVideoAnalysisPrompt(input);
+    const analysisPrompt = resolvedPrompt.prompt;
     const rawResponse = await this.runAnalysis(assetId, analysisPrompt);
     if (rawResponse.finishReason !== "stop") {
       throw new VideoAnalysisError(
