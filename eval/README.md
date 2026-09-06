@@ -25,7 +25,12 @@ Nova 2 Liteはオンデマンドの基盤モデルIDでは呼び出せないた�
 NOVA_MODEL_ID=global.amazon.nova-2-lite-v1:0
 ```
 
-このプロファイルはグローバルなクロスリージョン推論であり、動画が処理のためAWSの他リージョンへ転送される可能性がある。データ所在地を日本国内に限定する必要がある場合、ソウルのPegasus評価とは分けて、東京から`jp.amazon.nova-2-lite-v1:0`を呼び出す。
+BedrockへS3 URIを渡すため、`.env.local`の`AWS_ACCOUNT_ID`には対象S3バケットを所有する12桁のAWSアカウントIDを設定する。プロバイダーはこの値を`bucketOwner`へ渡し、別アカウントのバケットを誤参照しないようにする。
+
+このプロファイルはグローバルなクロスリージョン推論であり、動画が処理のためAPAC外を含むAWSの商用リージョンへ転送される可能性がある。AWS公式のNova 2 Liteモデルカードでは、`jp.amazon.nova-2-lite-v1:0`は東京（`ap-northeast-1`）だけがソースリージョンで、処理先は東京・大阪に限定される。一方、ソウルはGeo推論に非対応でGlobal推論だけに対応する。したがって日本国内限定にするには、Bedrockクライアントだけでなく動画S3も東京へ分け、東京からJPプロファイルを呼ぶ構成が必要になる。
+
+- [AWS: Nova 2 Lite（推論IDとリージョン別の利用可能性）](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-2-lite.html)
+- [AWS: Cross-Region inferenceのデータ所在地](https://docs.aws.amazon.com/bedrock/latest/userguide/cross-region-inference.html)
 
 `ThrottlingException: Too many tokens per day`が最初のリクエストから発生する場合は、コードや再試行ではなくAWSアカウントに割り当てられた日次トークンクォータが原因である。AWSコンソールの **Service Quotas → Amazon Bedrock → ap-northeast-2** で、Nova 2 Liteの「Cross-Region InvokeModel tokens per minute」と日次上限を確認し、必要なら増枠申請する。Novaが利用できない間も、`pnpm eval -- --provider pegasus`でPegasus単体の評価は継続できる。
 
@@ -39,12 +44,16 @@ pnpm eval
 
 ```bash
 pnpm eval -- --provider nova
+pnpm eval -- --provider nova --sample ollie-001
 pnpm eval -- --provider pegasus
+pnpm eval -- --provider pegasus --sample ollie-001
 ```
+
+`--sample <id>`を付けるとmanifest内の1件だけを実行する。NovaとPegasusの両経路とも本番と同じ`VideoAnalysisProvider`実装を使い、プロンプトとレスポンス検証を共通化している。NovaはJSON Schemaによる構造化出力を利用できないため、スキーマをプロンプト内の指示として渡す。モデルがJSONをMarkdownコードフェンスで囲む既知の形式差はNovaプロバイダー内で除去し、その後もJSON構文またはzod検証に失敗した場合だけ1秒後に1回再試行する。各呼び出しの上限を134.5秒とし、再試行を含む最悪時間を270秒以内に抑える。
 
 スクリプトは動画を`S3_BUCKET_NAME/eval/`へアップロードし、結果を`eval/output/`にJSONで保存する。評価用のS3オブジェクトは自動削除しない。比較が終わったらS3コンソールまたはAWS CLIから`eval/`プレフィックスを削除する。
 
-片方のモデルが失敗しても、`--provider both`ではもう片方を実行し、失敗内容を同じ結果JSONの`error`へ保存する。両方が失敗した場合だけ終了コードを1にする。
+片方のモデルが失敗しても、`--provider both`ではもう片方を実行し、失敗内容を同じ結果JSONの`error`へ保存する。SDKやプロバイダーの`cause`は、既存の秘密値マスクを通した`errorDetails`へ保存する。`attemptCount`には実際のモデル呼び出し回数を保存し、SDK到達前など判定不能な失敗では`null`にする。両方が失敗した場合だけ終了コードを1にする。
 
 ## TwelveLabs公式APIでPegasus 1.5を試す
 
