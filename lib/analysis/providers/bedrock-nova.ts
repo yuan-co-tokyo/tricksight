@@ -27,7 +27,7 @@ import {
 } from "../schema";
 
 export const DEFAULT_BEDROCK_NOVA_MODEL_ID =
-  "global.amazon.nova-2-lite-v1:0";
+  "jp.amazon.nova-2-lite-v1:0";
 // Nova 2 LiteはPegasusと異なり、オンデマンド呼び出しにも
 // 基盤モデルIDではなく推論プロファイルIDが必要。
 
@@ -112,6 +112,14 @@ function resolveConfig(config: BedrockNovaConfig): ResolvedBedrockNovaConfig {
   if (resolved.modelId === "amazon.nova-2-lite-v1:0") {
     throw new Error(
       "Bedrock Nova modelId must be an inference profile ID, not the foundation-model ID.",
+    );
+  }
+  if (
+    resolved.modelId.startsWith("jp.") &&
+    resolved.awsRegion !== "ap-northeast-1"
+  ) {
+    throw new Error(
+      "Bedrock Nova JP inference profiles require AWS_REGION=ap-northeast-1.",
     );
   }
   if (!Number.isInteger(resolved.maxTokens) || resolved.maxTokens < 1) {

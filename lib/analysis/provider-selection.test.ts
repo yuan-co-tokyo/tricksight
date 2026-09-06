@@ -3,16 +3,22 @@ import { describe, expect, it } from "vitest";
 import { resolveVideoAnalysisProviderSelection } from "./provider-selection";
 
 describe("resolveVideoAnalysisProviderSelection", () => {
-  it("未設定または空白なら既存のTwelveLabs直接接続を選ぶ", () => {
-    expect(resolveVideoAnalysisProviderSelection({})).toBe(
-      "twelvelabs-direct",
-    );
+  it("未設定または空白ならBedrock Novaを選ぶ", () => {
+    expect(resolveVideoAnalysisProviderSelection({})).toBe("bedrock-nova");
     expect(
       resolveVideoAnalysisProviderSelection({ VIDEO_ANALYSIS_PROVIDER: " " }),
+    ).toBe("bedrock-nova");
+  });
+
+  it("TwelveLabs直接接続を明示設定で選べる", () => {
+    expect(
+      resolveVideoAnalysisProviderSelection({
+        VIDEO_ANALYSIS_PROVIDER: " twelvelabs-direct ",
+      }),
     ).toBe("twelvelabs-direct");
   });
 
-  it("明示設定時だけBedrock Pegasusを選ぶ", () => {
+  it("Bedrock Pegasusを明示設定で選べる", () => {
     expect(
       resolveVideoAnalysisProviderSelection({
         VIDEO_ANALYSIS_PROVIDER: " bedrock-pegasus ",
@@ -20,7 +26,7 @@ describe("resolveVideoAnalysisProviderSelection", () => {
     ).toBe("bedrock-pegasus");
   });
 
-  it("Bedrock Novaも明示設定時だけ選ぶ", () => {
+  it("Bedrock Novaを明示設定でも選べる", () => {
     expect(
       resolveVideoAnalysisProviderSelection({
         VIDEO_ANALYSIS_PROVIDER: " bedrock-nova ",

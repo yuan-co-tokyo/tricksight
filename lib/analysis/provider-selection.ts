@@ -9,7 +9,7 @@ export function resolveVideoAnalysisProviderSelection(
   environment: Environment = process.env,
 ): VideoAnalysisProviderSelection {
   const selection =
-    environment.VIDEO_ANALYSIS_PROVIDER?.trim() || "twelvelabs-direct";
+    environment.VIDEO_ANALYSIS_PROVIDER?.trim() || "bedrock-nova";
 
   if (
     selection !== "twelvelabs-direct" &&

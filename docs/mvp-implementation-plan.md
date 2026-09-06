@@ -81,15 +81,15 @@ AIによる自動判定ではなく、ユーザーが事前にトリックを選
 
 ### 動画保存
 
-- Amazon S3（ソウル ap-northeast-2）
+- Amazon S3（東京 ap-northeast-1）
 - Presigned POSTによるブラウザからの直接アップロード
 
 ### AI分析
 
-- Amazon Bedrock（ソウル ap-northeast-2）
-- 候補は動画対応のAmazon Nova系と、動画特化のTwelveLabs Pegasus 1.2
-- どちらもS3 URI方式で動画を渡すため、S3バケットは呼び出しリージョンと同一である必要がある
-- Phase 0で候補モデルの棚卸しと品質比較を行い確定する
+- Amazon Bedrock（東京 ap-northeast-1）
+- 既定はAmazon Nova 2 LiteのJP推論プロファイル。TwelveLabs直接接続とBedrock Pegasusも比較・切り戻し用に残す
+- Bedrock経路はS3 URI方式で動画を渡すため、S3バケットは呼び出し元リージョンと同一にする。TwelveLabs直接経路はpresigned URLを使う
+- Phase 0の棚卸しと17本比較を経てNovaを既定に確定した
 
 Pegasusは同期`InvokeModel`で呼び出せ、`responseFormat.jsonSchema`による構造化出力をネイティブに備える。第9章の`SkateAnalysisResult`をスキーマとして直接渡せるため、Novaのプロンプト依存のJSON生成より扱いやすい。
 
@@ -152,10 +152,12 @@ Supabaseを選んだ理由は東京リージョンがあることの一点であ
 | --- | --- | --- |
 | Vercel関数 | 東京 `hnd1` | 体感速度。Hobbyプランは単一リージョンだが変更可能 |
 | Supabase | 東京 `ap-northeast-1` | Vercel関数と同居させDBアクセスを最短にする |
-| S3 | ソウル `ap-northeast-2` | Bedrockと同一リージョンにする必要がある |
-| Bedrock | ソウル `ap-northeast-2` | Pegasusの提供がAPACではソウルのみ |
+| S3 | 東京 `ap-northeast-1` | Bedrockの呼び出し元と同じ東京に置き、動画入力を日本国内に保つ |
+| Bedrock | 東京 `ap-northeast-1` | Nova 2 LiteのJP推論プロファイルを呼べる唯一のソースリージョン |
 
-動画データはリージョンを跨がない。ブラウザはS3ソウルへ直接アップロードし、Bedrockは同一リージョン内でそれを読む。東京のVercel関数がソウルのBedrockを呼ぶ経路は動画本体を運ばないため、増える遅延は分析時間に対して無視できる。
+当初は、Pegasus 1.2のAPAC提供がソウルだけだったため、S3とBedrockをソウルにそろえ、動画を呼び出し元リージョンの外へ出さない構成を選んだ。その後、同一17本の比較でNova 2 Liteの品質が明確に上回り、既定をNovaへ変更した。Nova 2 Liteの`jp.amazon.nova-2-lite-v1:0`は東京からだけ呼び出せ、処理先も東京・大阪に限定されるため、S3とBedrockの呼び出し元を東京へ全面移行する。
+
+新構成では、ブラウザはS3東京へ直接アップロードし、東京のBedrockエンドポイントがそのS3 URIを読む。JP推論プロファイル内では東京または大阪へ処理がルーティングされ得るため厳密にはAWSリージョンを跨ぐ場合があるが、動画データが日本国外へ出ないという当初の目的をより強く満たす。Vercel関数とSupabaseも東京であり、アプリ全体の主要経路が東京にそろう。
 
 ### インフラ管理
 
@@ -174,7 +176,7 @@ Supabaseを選んだ理由は東京リージョンがあることの一点であ
 ### ホスティング
 
 - Next.js：Vercel Hobby（東京 `hnd1`）
-- AI・動画処理：AWS（S3 + Bedrock、ソウル）
+- AI・動画処理：AWS（S3 + Bedrock、東京。Novaの処理先は東京・大阪）
 - DB：Supabase Free（東京）
 - 認証：Better Auth（アプリ内）
 
@@ -211,12 +213,12 @@ Next.jsホスティングの移行先はコンテナ（App Runner等）または
   │
   ├─ Presigned POST情報取得 ────┐
   │                             │
-  └─ 動画を直接アップロード ──────┴─→ Amazon S3（ソウル）
+  └─ 動画を直接アップロード ──────┴─→ Amazon S3（東京）
                                             │
                                             │ 同一リージョン内で読み取り
                                             ▼
-       Route Handlerのバックグラウンド処理 ─→ Amazon Bedrock（ソウル）
-       （Vercel / 東京）                        Nova または Pegasus
+       Route Handlerのバックグラウンド処理 ─→ Amazon Bedrock（東京）
+       （Vercel / 東京）                        Nova 2 Lite（JP）
                     │                              │
                     └──────────────────────────────┘
                                     │
@@ -224,7 +226,7 @@ Next.jsホスティングの移行先はコンテナ（App Runner等）または
                     分析結果をPostgreSQL（東京）へ保存
 ```
 
-動画本体が越境しないことがこの構成の要点である。ブラウザからS3ソウルへ直接上げ、Bedrockはそれを同一リージョン内で読む。東京のVercel関数とソウルのBedrockの間を流れるのはAPI呼び出しとJSON結果だけになる。
+動画本体が日本国外へ出ないことがこの構成の要点である。ブラウザからS3東京へ直接上げ、東京のBedrockエンドポイントへS3 URIを渡す。NovaのJP推論プロファイルによる処理先は東京・大阪だけである。TwelveLabs直接接続を明示した場合は、比較・切り戻し用途としてpresigned URLを外部APIへ渡す別経路になる。
 
 ## 7. 動画アップロード方式
 
@@ -440,14 +442,16 @@ interface VideoAnalysisProvider {
 
 ```text
 VideoAnalysisProvider
-├─ TwelveLabsDirectVideoAnalyzer（既定）
-├─ BedrockPegasusVideoAnalyzer（環境変数で明示時）
-└─ BedrockNovaVideoAnalyzer（環境変数で明示時）
+├─ BedrockNovaVideoAnalyzer（既定）
+├─ TwelveLabsDirectVideoAnalyzer（環境変数で明示時）
+└─ BedrockPegasusVideoAnalyzer（環境変数で明示時）
 ```
 
-既定は実績のあるTwelveLabs公式API経路を維持し、`VIDEO_ANALYSIS_PROVIDER=bedrock-pegasus`または`bedrock-nova`を明示した場合だけBedrockへ切り替える。Bedrock実装はS3 URIを直接渡し、共通のAWSクライアント設定により本番のVercel OIDCとローカルのSDK既定認証情報チェーンを切り替える。Novaは構造化出力に非対応のため、Markdownコードフェンスをモデル固有の正規化として除去し、それでも生成JSONの構文またはzod検証に失敗した場合だけ1回再試行する。プロバイダー全体の最悪時間は270秒に制限する。Phase 0の比較結果からMVPの既定を決め、落選した側も評価ハーネスから呼べる状態で残す。
+Phase 0では両方を実装し、比較結果の良かった方をMVPの既定とする方針だった。同一17本で評価した結果、正答はTwelveLabs直接が8/17（47%）、Nova 2 Liteが12/17（71%）だった。失敗10本の検出は直接APIが1本、Novaが8本で、scoresが動画間で異なったのも直接APIの6/17に対しNovaは12/17だった。TwelveLabs直接は常に`LANDED`とするダミー（7/17、41%）に近く、計画書§19の中心価値である失敗原因と改善点の提示を支えられない。以上から`bedrock-nova`を未設定時の既定とした。
 
-NovaのGlobal推論プロファイルは世界中の対応商用リージョンへ処理をルーティングできるため、§5の「動画データはリージョンを跨がない」と両立しない。日本国内限定の`jp.amazon.nova-2-lite-v1:0`は東京をソースとし東京・大阪だけへルーティングするが、ソウルからは利用できない。本番でNovaを採用する場合は、Global利用を明示的に許容するか、動画S3とBedrock呼び出しを東京へ分けるかを決定する。
+Bedrock実装はS3 URIを直接渡し、共通のAWSクライアント設定により本番のVercel OIDCとローカルのSDK既定認証情報チェーンを切り替える。Novaは構造化出力に非対応のため、Markdownコードフェンスをモデル固有の正規化として除去し、それでも生成JSONの構文またはzod検証に失敗した場合だけ1回再試行する。プロバイダー全体の最悪時間は270秒に制限する。TwelveLabs直接は`VIDEO_ANALYSIS_PROVIDER=twelvelabs-direct`で切り戻せ、Bedrock Pegasus実装も調査再開用に残す。
+
+NovaのモデルIDは環境変数`NOVA_MODEL_ID`で変更できるが、既定は日本国内限定の`jp.amazon.nova-2-lite-v1:0`とする。このプロファイルは東京をソースとし東京・大阪だけへルーティングする。ソウルからは利用できないため、コードはJPプロファイルと`AWS_REGION=ap-northeast-1`以外の組み合わせを拒否する。
 
 将来：
 
@@ -707,15 +711,15 @@ private/{userId}/{sessionId}/{videoId}/original.mp4
 ### Phase 0：分析品質検証
 
 - プロジェクト専用IAMとBedrockモデルアクセスの準備
-- ソウルリージョンで利用可能な動画対応モデルの棚卸し（`aws bedrock list-foundation-models`および`list-inference-profiles`で実機確認する）
-- リージョン整合（S3とBedrockがともにソウル）の確認
+- ソウルリージョンで利用可能な動画対応モデルを棚卸し（実施済み。当初のPegasus評価用）
+- 比較結果を受け、S3とBedrockの呼び出し元を東京へ移し、Nova JP推論プロファイルとの整合を確認
 - 検証用スケート動画の収集。同一トリックについて通常撮影版とスローモーション版の両方を用意する
 - トリック別プロンプトv1の作成
 - 候補モデルの比較（Nova系 / TwelveLabs Pegasus 1.2）
 - 評価ハーネス（`pnpm eval`）の実装
 - 第18章の確認項目による品質判定
 
-候補モデルは実機確認の結果で確定する。Nova 2およびNova Lite 1.5の存在と、それらのソウルでの提供状況を最初に確認する。Nova Lite 1.5は20分の動画まで1FPSのサンプリングを維持するとされており、旧Lite（16分で頭打ち）と挙動が異なる。
+候補モデルの実機確認と17本比較を経て、Nova 2 Liteを既定に確定した。Bedrock Pegasusは標準H.264動画を処理できず調査保留、TwelveLabs直接は比較品質でNovaを下回ったため切り戻し用とする。
 
 Phase 0はPhase 1〜3と並行できるが、Phase 5の実装はPhase 0の品質判定を通過してから始める。
 
@@ -752,7 +756,7 @@ Phase 0はPhase 1〜3と並行できるが、Phase 5の実装はPhase 0の品質
 
 ### Phase 4：動画アップロード
 
-- S3バケット（ソウル）とCORS設定
+- S3バケット（東京）とCORS設定
 - サイズ上限とContent-Typeを強制するPresigned POST
 - アップロード完了後の`HeadObject`再検証
 - 動画プレビュー

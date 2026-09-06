@@ -8,14 +8,16 @@ Phase 0の分析品質検証と、以後のMVP開発で使うAWS側の権限を�
 
 | 用途 | リージョン |
 | --- | --- |
-| S3（動画） | ソウル `ap-northeast-2` |
-| Bedrock（分析） | ソウル `ap-northeast-2` |
+| S3（動画） | 東京 `ap-northeast-1` |
+| Bedrock（分析） | 東京 `ap-northeast-1` |
 | Vercel関数 | 東京 `hnd1` |
 | Supabase（DB） | 東京 `ap-northeast-1` |
 
-S3とBedrockは必ず同一リージョンに置く。NovaもPegasusも、S3 URIで動画を渡す場合はバケットが呼び出しリージョンと同一である必要がある。ソウルを選ぶ理由は、TwelveLabs PegasusのAPAC提供がソウルのみであるため。
+S3とBedrockの呼び出し元は同じ東京に置く。S3 URIで動画を渡すため、バケットはBedrockの呼び出し元リージョンと同一にする。
 
-Nova 2 Liteをソウルから呼び出すには、基盤モデルIDではなく`global.amazon.nova-2-lite-v1:0`というシステム定義の推論プロファイルを`modelId`に指定する。このプロファイルはグローバルなクロスリージョン推論であり、処理先がソウル以外になる可能性がある。動画データの処理場所を国内に限定する要件がある場合、Novaの評価は東京から`jp.amazon.nova-2-lite-v1:0`を使って別途実施する。
+当初はTwelveLabs PegasusのAPAC提供がソウルだけだったためソウルを選んだが、17本の品質比較でNova 2 Liteを既定に決定した。`jp.amazon.nova-2-lite-v1:0`は東京からだけ呼び出せ、処理先は東京・大阪に限定される。旧ソウル構成のGlobal推論と異なり、動画処理を日本国内に保てるため東京へ移行する。
+
+> **移行前の重要事項:** 現在の`tricksight-vercel-role`にはNovaを呼ぶ`bedrock:InvokeModel`が付与されていない。東京バケットへのS3権限と、下記のJP推論プロファイル権限を追加するまで、本番で`bedrock-nova`は動作しない。
 
 認証情報の持ち方は環境で分ける。
 
@@ -81,8 +83,8 @@ IAMコンソール → ポリシー → ポリシーの作成 → JSONタブへ�
 
 ### 設計意図
 
-- Bedrockの呼び出しはNova系とTwelveLabs系のモデルファミリーに限定する。個別のモデルIDを列挙しないのは、Phase 0で候補モデルの棚卸しをするまで採用モデルが確定しないため。確定後に実際に使うモデルIDへ絞り込む。
-- 推論プロファイルはアカウント配下に限定する。クロスリージョン推論が他リージョンへルーティングするため、リージョン部分は`*`にする。
+- ローカル開発用ポリシーは比較評価と調査再開に使えるよう、Nova系とTwelveLabs系のモデルファミリーを許可する。本番用ロールは後述のJP推論プロファイルだけへ絞る。
+- 推論プロファイルはアカウント配下に限定する。複数リージョンでの評価履歴を再現できるよう、ローカル用だけリージョン部分を`*`にする。
 - S3は`tricksight-`で始まるバケットだけに限定する。
 - バケット作成とCORS設定（Phase 4のブラウザ直接アップロードで必要）まで含めたので、以後ポリシーの変更はモデルID絞り込み以外ほぼ不要。
 
@@ -140,7 +142,7 @@ IAMコンソール → IDプロバイダ → プロバイダを追加 → OpenID
 
 `<VERCEL_PROJECT_NAME>`はVercel Dashboardに表示されるプロジェクト名（通常は`tricksight`）と完全一致させる。
 
-次の権限ポリシーを`tricksight-vercel-runtime-policy`として作成し、このロールだけにアタッチする。`<S3_BUCKET_NAME>`はProductionの`S3_BUCKET_NAME`と同じ実バケット名へ置き換える。
+次の権限ポリシーを`tricksight-vercel-runtime-policy`として更新し、このロールだけにアタッチする。S3のARNは移行先の東京バケットを明示する。
 
 ```json
 {
@@ -154,21 +156,37 @@ IAMコンソール → IDプロバイダ → プロバイダを追加 → OpenID
         "s3:GetObject",
         "s3:DeleteObject"
       ],
-      "Resource": "arn:aws:s3:::<S3_BUCKET_NAME>/private/*"
+      "Resource": "arn:aws:s3:::tricksight-dev-561143850472-ap-northeast-1-an/private/*"
     },
     {
-      "Sid": "InvokeBedrockPegasus",
+      "Sid": "InvokeNovaJpInferenceProfile",
       "Effect": "Allow",
       "Action": "bedrock:InvokeModel",
-      "Resource": "arn:aws:bedrock:ap-northeast-2::foundation-model/twelvelabs.pegasus-1-2-v1:0"
+      "Resource": "arn:aws:bedrock:ap-northeast-1:561143850472:inference-profile/jp.amazon.nova-2-lite-v1:0"
+    },
+    {
+      "Sid": "InvokeNovaJpFoundationModelsViaProfile",
+      "Effect": "Allow",
+      "Action": "bedrock:InvokeModel",
+      "Resource": [
+        "arn:aws:bedrock:ap-northeast-1::foundation-model/amazon.nova-2-lite-v1:0",
+        "arn:aws:bedrock:ap-northeast-3::foundation-model/amazon.nova-2-lite-v1:0"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "bedrock:InferenceProfileArn": "arn:aws:bedrock:ap-northeast-1:561143850472:inference-profile/jp.amazon.nova-2-lite-v1:0"
+        }
+      }
     }
   ]
 }
 ```
 
-ブラウザ直接アップロードの署名には`PutObject`、再生・TwelveLabsへの入力URL・`HeadObject`検証には`GetObject`、不正アップロードの後始末には`DeleteObject`が必要である。Bedrock Pegasusは同期`InvokeModel`だけを使うため、`InvokeModelWithResponseStream`は付与しない。動画は既存の`private/*`に対する`GetObject`権限で読み取り、同一リージョンのS3 URIを直接渡す。
+ブラウザ直接アップロードの署名には`PutObject`、再生・TwelveLabsへの入力URL・`HeadObject`検証には`GetObject`、不正アップロードの後始末には`DeleteObject`が必要である。NovaはConverse APIを非ストリーミングで使うため、必要なアクションは`bedrock:InvokeModel`だけである。AWSの地理的クロスリージョン推論では、推論プロファイル本体に加え、全処理先の基盤モデルも許可する必要がある。基盤モデル側には`bedrock:InferenceProfileArn`条件を付け、JPプロファイルを介さない直接呼び出しを防ぐ。
 
-ランタイムはバケット一覧やCORS変更をしないため、`ListBucket`、`CreateBucket`、`PutBucketCors`は付与しない。`sts:AssumeRoleWithWebIdentity`は上の信頼ポリシーで許可するものであり、権限ポリシーへ追加する必要はない。TwelveLabs直接接続を既定のまま使う間はBedrock文を追加せず、`VIDEO_ANALYSIS_PROVIDER=bedrock-pegasus`へ切り替える前に追加してもよい。
+ランタイムはバケット一覧やCORS変更をしないため、`ListBucket`、`CreateBucket`、`PutBucketCors`は付与しない。`sts:AssumeRoleWithWebIdentity`は上の信頼ポリシーで許可するものであり、権限ポリシーへ追加する必要はない。Bedrock Pegasusは調査保留中で本番既定ではないため、このランタイムポリシーには権限を付与しない。実装自体は残っており、将来再開する場合は対象リージョンとモデルARNを確認して別途追加する。
+
+参考：AWS公式の[地理的クロスリージョン推論のIAM要件](https://docs.aws.amazon.com/bedrock/latest/userguide/geographic-cross-region-inference.html)と[Nova 2 Liteモデルカード](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-2-lite.html)。
 
 `sub`を`production`だけに限定しているため、Preview Deploymentと`development`（ローカル）はこのロールを引けない。Previewへ本番用ロールを許可すると、Previewコードから本番動画の取得・削除やBedrock呼び出しが可能になるため、MVPでは許可しない。ローカルは次章のアクセスキーを使う。
 
@@ -180,21 +198,22 @@ Vercelプロジェクトの環境変数へ以下を**Production環境だけを�
 
 ```bash
 AWS_ROLE_ARN=arn:aws:iam::<ACCOUNT_ID>:role/tricksight-vercel-role
-AWS_REGION=ap-northeast-2
+AWS_REGION=ap-northeast-1
 AWS_ACCOUNT_ID=<ACCOUNT_ID>
-S3_BUCKET_NAME=tricksight-videos-<suffix>
+S3_BUCKET_NAME=tricksight-dev-561143850472-ap-northeast-1-an
+NOVA_MODEL_ID=jp.amazon.nova-2-lite-v1:0
 TWELVELABS_API_KEY=<production-api-key>
 TWELVELABS_MODEL_NAME=pegasus1.5
-VIDEO_ANALYSIS_PROVIDER=twelvelabs-direct
+VIDEO_ANALYSIS_PROVIDER=bedrock-nova
 ```
 
-**`AWS_REGION`の明示は必須である。** Vercelは`AWS_REGION`を関数の実行リージョンで自動設定するため、明示しないと東京（`ap-northeast-1`）が入り、ソウルにあるS3とBedrockを呼べなくなる。この構成では関数の実行リージョンとAWS資源のリージョンが意図的に異なるため、必ず上書きする。
+**`AWS_REGION`の明示は必須である。** JP推論プロファイルは東京（`ap-northeast-1`）からだけ呼び出せる。S3バケットも東京にそろえる。コードはJPプロファイルと東京以外のリージョンの組み合わせを起動時に拒否する。
 
 **`AWS_ACCOUNT_ID`も必須である。** BedrockへS3 URIを渡すときの`bucketOwner`として使用し、別アカウントのバケットを誤って読ませるconfused deputyを防ぐ。実行時にSTS `GetCallerIdentity`で導出せず設定値にすることで、本番OIDCロールの権限をS3とBedrockだけに維持する。
 
 Productionに`AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY`、`AWS_SESSION_TOKEN`、`VERCEL_OIDC_TOKEN`を手動設定しない。OIDCトークンはVercelがFunctionのリクエストコンテキストへ自動供給する。
 
-`VIDEO_ANALYSIS_PROVIDER`は未設定でも`twelvelabs-direct`になる。Bedrockを有効にするときだけ`bedrock-pegasus`または`bedrock-nova`へ変更し、必要に応じて各モデルIDを設定する。Novaの既定Global推論プロファイルはAPAC外を含む商用リージョンへ処理をルーティングし得るため、本番で選ぶ前にデータ所在地の判断と推論プロファイル用IAM権限の追加が必要である。日本国内限定の`jp.amazon.nova-2-lite-v1:0`は東京だけがソースリージョンで、東京・大阪へルーティングする。現在のソウルS3をそのまま使う構成とは両立しない。
+`VIDEO_ANALYSIS_PROVIDER`は未設定でも`bedrock-nova`になる。本番では意図を明示するため値も設定する。障害時や比較時は`twelvelabs-direct`へ変更でき、`TWELVELABS_API_KEY`と`TWELVELABS_MODEL_NAME`はその切り戻しのため維持する。`bedrock-pegasus`もコード上は選べるが、モデル入力エラーの調査保留中で、本番OIDCロールには権限を付与していない。
 
 Nova 2 Liteの最新の推論ID・ソース/送信先リージョンは[AWS公式モデルカード](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-2-lite.html)で確認する。
 
@@ -209,7 +228,7 @@ import { createAwsClientConfig } from "@/lib/aws/client-config";
 import { S3Client } from "@aws-sdk/client-s3";
 
 const client = new S3Client(
-  createAwsClientConfig({ region: "ap-northeast-2" }),
+  createAwsClientConfig({ region: "ap-northeast-1" }),
 );
 ```
 
@@ -233,30 +252,45 @@ IAMコンソール → ユーザー → ユーザーの作成。
 ```bash
 AWS_ACCESS_KEY_ID=AKIA...
 AWS_SECRET_ACCESS_KEY=...
-AWS_REGION=ap-northeast-2
-S3_BUCKET_NAME=tricksight-videos-<suffix>
+AWS_REGION=ap-northeast-1
+AWS_ACCOUNT_ID=561143850472
+S3_BUCKET_NAME=tricksight-dev-561143850472-ap-northeast-1-an
+NOVA_MODEL_ID=jp.amazon.nova-2-lite-v1:0
+VIDEO_ANALYSIS_PROVIDER=bedrock-nova
 ```
 
 一時認証情報（アクセスキーIDが`ASIA`で始まるもの）を使う場合は、有効期限までの`AWS_SESSION_TOKEN`も必要になる。ただしPhase 0では、期限切れによる中断を避けるため、前節で作成した`tricksight-dev`のアクセスキー（`AKIA`で始まるもの）を使うことを推奨する。
 
 ## 4. S3バケットを作る
 
-ソウル（`ap-northeast-2`）に作成する。
+東京（`ap-northeast-1`）に作成する。
 
-- バケット名：`tricksight-videos-<suffix>`（`tricksight-`で始めること。ポリシーがこの前提になっている）
+- バケット名：`tricksight-dev-561143850472-ap-northeast-1-an`
 - パブリックアクセスはすべてブロックする
 - 動画の閲覧はPresigned URLで行うため、公開設定は不要
 
-Phase 4でブラウザからの直接アップロードを実装する際に、CORS設定を追加する。
+S3コンソールの **アクセス許可 → Cross-Origin Resource Sharing (CORS)** に次を設定する。`<PRODUCTION_ORIGIN>`は実際のVercel本番URL（例：`https://tricksight.example.com`）へ置き換え、末尾の`/`は付けない。ローカルから直接アップロードを確認しない場合は`http://localhost:3000`を省いてよい。
 
-## 5. モデルアクセスを有効化する（ソウルリージョン）
+```json
+[
+  {
+    "AllowedHeaders": ["*"],
+    "AllowedMethods": ["GET", "HEAD", "POST"],
+    "AllowedOrigins": ["<PRODUCTION_ORIGIN>", "http://localhost:3000"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
 
-Bedrockコンソールを**ソウル（ap-northeast-2）**に切り替え、モデルアクセスのページで動画対応モデルを有効化する。
+## 5. モデルアクセスを有効化する（東京リージョン）
+
+Bedrockコンソールを**東京（ap-northeast-1）**に切り替え、Nova 2 Liteが利用可能であることを確認する。
 
 アカウントレベルの設定なので、管理者ログインのまま行う。
 
-- **Amazon Nova系**：Amazon製のため即時有効になる見込み。
-- **TwelveLabs Pegasus 1.2**：サードパーティモデルのため利用規約への同意が求められる。
+- **Amazon Nova 2 Lite**：`jp.amazon.nova-2-lite-v1:0`を使用する。ソースは東京、処理先は東京・大阪である。
+- **TwelveLabs Pegasus 1.2**：実装は残すが、Bedrock版は標準H.264動画の入力エラーで調査保留中。本番既定にはしない。
 
 利用可能なモデルの一覧はコンソールの表示と実際のAPIで食い違うことがあるため、次章のコマンドで実機確認する。
 
@@ -268,23 +302,23 @@ Bedrockコンソールを**ソウル（ap-northeast-2）**に切り替え、モ�
 # 認証情報が有効であること
 aws sts get-caller-identity
 
-# ソウルで利用可能な動画対応モデルの棚卸し
+# 東京で利用可能な動画対応モデルの確認
 aws bedrock list-foundation-models \
-  --region ap-northeast-2 \
+  --region ap-northeast-1 \
   --by-output-modality TEXT \
   --query "modelSummaries[?contains(inputModalities, 'VIDEO')].[modelId,modelName]" \
   --output table
 
 # 推論プロファイルの確認
-aws bedrock list-inference-profiles --region ap-northeast-2 --output table
+aws bedrock list-inference-profiles --region ap-northeast-1 --output table
 ```
 
-この結果がPhase 0の候補モデル確定の入力になる。特に以下を確認する。
+東京バケット作成とIAM更新が完了した後にこの確認を行う。特に以下を確認する。
 
-- Nova 2およびNova Lite 1.5がソウルで使えるか
-- Pegasus 1.2の呼び出しに必要なのが直接のモデルIDか、推論プロファイルか
+- `jp.amazon.nova-2-lite-v1:0`が一覧にあり、東京をソースとして使えること
+- 実行ロールのポリシーに推論プロファイルと東京・大阪の基盤モデルARNがすべて含まれること
 
-確認できたモデルIDを、第1章のポリシーの`Resource`へ反映して権限を絞り込む。
+T10の設定変更段階では東京バケットが未作成のため、実API呼び出しや評価の再実行は行わない。
 
 ## 補足
 

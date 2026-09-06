@@ -19,20 +19,22 @@ mkdir -p eval/input
 pnpm verify:aws
 ```
 
-Nova 2 Liteはオンデマンドの基盤モデルIDでは呼び出せないため、`.env.local`で推論プロファイルIDを指定する。ソウルからは以下を使う。
+Nova 2 Liteはオンデマンドの基盤モデルIDでは呼び出せないため、`.env.local`で推論プロファイルIDを指定する。既定構成は東京のS3からJP推論プロファイルを呼ぶ。
 
 ```bash
-NOVA_MODEL_ID=global.amazon.nova-2-lite-v1:0
+AWS_REGION=ap-northeast-1
+S3_BUCKET_NAME=tricksight-dev-561143850472-ap-northeast-1-an
+NOVA_MODEL_ID=jp.amazon.nova-2-lite-v1:0
 ```
 
 BedrockへS3 URIを渡すため、`.env.local`の`AWS_ACCOUNT_ID`には対象S3バケットを所有する12桁のAWSアカウントIDを設定する。プロバイダーはこの値を`bucketOwner`へ渡し、別アカウントのバケットを誤参照しないようにする。
 
-このプロファイルはグローバルなクロスリージョン推論であり、動画が処理のためAPAC外を含むAWSの商用リージョンへ転送される可能性がある。AWS公式のNova 2 Liteモデルカードでは、`jp.amazon.nova-2-lite-v1:0`は東京（`ap-northeast-1`）だけがソースリージョンで、処理先は東京・大阪に限定される。一方、ソウルはGeo推論に非対応でGlobal推論だけに対応する。したがって日本国内限定にするには、Bedrockクライアントだけでなく動画S3も東京へ分け、東京からJPプロファイルを呼ぶ構成が必要になる。
+`jp.amazon.nova-2-lite-v1:0`は東京（`ap-northeast-1`）だけがソースリージョンで、処理先は東京・大阪に限定される。コードもJP推論プロファイルと東京以外の`AWS_REGION`の組み合わせを拒否する。旧構成のソウルから使っていた`global.amazon.nova-2-lite-v1:0`はAPAC外を含むAWSの商用リージョンへ転送され得るため、通常の開発・本番設定には使わない。
 
 - [AWS: Nova 2 Lite（推論IDとリージョン別の利用可能性）](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-2-lite.html)
 - [AWS: Cross-Region inferenceのデータ所在地](https://docs.aws.amazon.com/bedrock/latest/userguide/cross-region-inference.html)
 
-`ThrottlingException: Too many tokens per day`が最初のリクエストから発生する場合は、コードや再試行ではなくAWSアカウントに割り当てられた日次トークンクォータが原因である。AWSコンソールの **Service Quotas → Amazon Bedrock → ap-northeast-2** で、Nova 2 Liteの「Cross-Region InvokeModel tokens per minute」と日次上限を確認し、必要なら増枠申請する。Novaが利用できない間も、`pnpm eval -- --provider pegasus`でPegasus単体の評価は継続できる。
+`ThrottlingException: Too many tokens per day`が最初のリクエストから発生する場合は、コードや再試行ではなくAWSアカウントに割り当てられた日次トークンクォータが原因である。AWSコンソールの **Service Quotas → Amazon Bedrock → ap-northeast-1** で、Nova 2 Liteの「Cross-Region InvokeModel tokens per minute」と日次上限を確認し、必要なら増枠申請する。Novaが利用できない間も、`pnpm eval -- --provider pegasus`でPegasus単体の評価は継続できる。
 
 ## 実行
 

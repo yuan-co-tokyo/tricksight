@@ -147,7 +147,7 @@ T1-6-fix1 で `error_message` にAPIエラー本文を保存する対応を入�
 
 Vercel Production に設定されているのは `DATABASE_URL` / `BETTER_AUTH_SECRET` / `BETTER_AUTH_URL` のみ。`S3_BUCKET_NAME` / `AWS_REGION` / AWS認証情報が無いため、**本番では動画アップロードが動作しない**（2026-08-18 に実機で確認）。
 
-ただし §5・§15 により本番へ静的アクセスキーを置くことはできないため、有効化には Vercel OIDC federation の実装が前提となる。順序は「OIDC実装 → B-1/B-2/B-3 修正 → 本番通し確認」とする。
+ただし §5・§15 により本番へ静的アクセスキーを置くことはできない。Vercel OIDC federationのアプリ側実装は完了したが、実環境のOIDCロールには`bedrock:InvokeModel`がまだ付与されていない。東京バケット作成、ランタイムポリシー更新、Vercel環境変数更新の後に本番通し確認を行う。
 
 ### 評価結果（2026-08-18、14サンプル）
 
@@ -194,18 +194,18 @@ ollie-007 (失敗)  85/80/85/80/85   ← 成功と完全に同一
 
 | 課題 | 内容 |
 | --- | --- |
-| **分析品質** | **失敗検出が0/7。プロダクトの成立性に直結。スロー撮影の失敗動画で交絡を解くのが次の一手** |
+| **本番AWS移行** | 東京バケット作成、CORS設定、OIDCロールへのS3東京バケット権限とNova用`bedrock:InvokeModel`付与、Vercel環境変数更新が必要 |
 | B-1 confidence範囲外 | **修正済み。** confidenceの0〜1尺度を`common-system-v2`に明記し、14本すべてschema通過 |
 | B-2 失敗時のraw_response | **修正済み。** 出力検証失敗時もマスク済み診断envelopeを保存し、クライアントには非公開 |
 | B-3 署名失敗時のゴミ行 | 失敗のたびに PENDING_UPLOAD の行が増える |
-| Vercel OIDC未実装 | `AWS_ROLE_ARN` / `AssumeRole` / `@vercel/functions` いずれも未実装。§5・§15により本番へ静的アクセスキーを置けないため、本番での分析実行の前提 |
-| 分析品質 | 成功・失敗の判定が2件中2件で誤り（上記）。H-1後に最優先で再評価 |
-| 評価動画 | H-1 未着手。失敗した試技を含むセットが必要 |
+| OIDCロールのBedrock権限 | アプリ側のOIDC対応は完了。実ロールには`bedrock:InvokeModel`が未付与で、本番Nova実行前に追加が必要 |
+| 分析品質 | 17本比較でNovaは12/17正答、失敗10本中8本を検出。残る誤判定5本はプロンプト・撮影条件の改善対象 |
+| スロー撮影の効果 | Novaはスロー3/5、通常9/12で正答し、スロー撮影は主因ではなかった。計画書§7の前提変更は別タスクで扱う |
 
 ## 前提
 
-- **既定の分析はTwelveLabs公式API**：Pegasus 1.5をIndex無しのAsset同期分析で使う（`scripts/eval-twelvelabs.ts` で疎通済み）。
-- `VIDEO_ANALYSIS_PROVIDER=bedrock-pegasus`または`bedrock-nova`を明示した場合だけBedrockへ切り替える。未設定時は既存のTwelveLabs直接経路を維持する。
+- **既定の分析はBedrock Nova 2 Lite**：未設定時は`bedrock-nova`を選び、東京から`jp.amazon.nova-2-lite-v1:0`を呼ぶ。
+- `VIDEO_ANALYSIS_PROVIDER=twelvelabs-direct`でTwelveLabs公式APIへ切り戻せる。`bedrock-pegasus`の実装も調査再開用に維持する。
 - 計画書§10の `VideoAnalysisProvider` インターフェースは変更しない。TwelveLabs直接接続はS3のpresigned GET URL、Bedrockは同一リージョンのS3 URIを直接使用する。
 
 ## 現状の棚卸し
@@ -318,14 +318,14 @@ ollie-007 (失敗)  85/80/85/80/85   ← 成功と完全に同一
 
 | ID | タスク | 完了条件 |
 | --- | --- | --- |
-| T5-0 | S3バケット（ソウル）作成とCORS設定。`docs/aws-iam-setup.md` へ手順追記 | **人間の作業**。バケット非公開 |
+| T5-0 | S3バケット（東京）作成とCORS設定。`docs/aws-iam-setup.md` へ手順追記 | **人間の作業**。バケット非公開 |
 | T5-1 | Presigned POST 発行 Route Handler。キー完全一致・`content-length-range` 100MB・Content-Type完全一致（mp4/quicktime）・有効期限5分をポリシーに含める | ポリシー条件をテストで確認 |
 | T5-2 | ブラウザ直アップロード＋進捗表示＋動画プレビュー＋長さ3〜20秒のクライアント検証 | — |
 | T5-3 | アップロード完了通知API。`HeadObject` でキー・サイズ・Content-Typeを再検証し、DB上のユーザーIDとキーの対応も照合。失敗したオブジェクトは削除 | 別ユーザーのキーを指定すると拒否される |
 | T5-4 | 期限付き再生URL（presigned GET）とアクセス制御 | 直リンクが期限切れになる |
 | T5-5 | スローモーション撮影の要求UI（撮影画面・アップロード画面の両方、計画書§7） | 必須要件として明示される |
 
-## T6：非同期分析（Phase 5・TwelveLabs公式APIで実施）
+## T6：非同期分析（Phase 5・プロバイダ抽象化で実施）
 
 | ID | タスク | 完了条件 |
 | --- | --- | --- |
@@ -386,9 +386,21 @@ Vercel Runtime Logsで検索する構造化イベント、分析失敗時のDB�
 | --- | --- |
 | T9-1 | **実装済み・調査の上で保留。** Marketplace購読権限と`bucketOwner`は解消したが、標準H.264動画2本をBedrock側が処理不能。直接APIで稼働済みのPegasusと冗長なため追加課金を止める |
 | T9-2 | **実装・単体実測済み。** Nova 2 Liteを追加。モデル固有のMarkdownフェンスを除去後、JSON構文・zod検証失敗だけを1秒後に1回再試行し、最大270秒。評価ハーネスも同じ実装を再利用 |
-| T9-3 | 同一動画セットで TwelveLabs公式API / Pegasus on Bedrock / Nova を比較（計画書§18の確認項目9） |
-| T9-4 | 比較結果に基づき既定プロバイダを決定。落選側も評価ハーネスから呼べる状態で残す |
-| T9-5 | 本番のAWSアクセスをVercel OIDC federationへ切り替え |
+| T9-3 | **完了。** 同一17本でTwelveLabs公式APIとNovaを比較。Bedrock Pegasusは入力拒否のため保留 |
+| T9-4 | **完了。** 品質比較に基づきNovaを既定に決定。TwelveLabs直接とBedrock Pegasusも選択可能なまま残す |
+| T9-5 | **アプリ実装済み・外部設定待ち。** Vercel OIDC federation対応済み。実ロールへのNova権限付与が必要 |
+
+### T9-3/T9-4 同一17本の比較結果
+
+| 指標 | TwelveLabs直接 | Nova 2 Lite |
+| --- | ---: | ---: |
+| 正答 | 8/17（47%） | **12/17（71%）** |
+| 失敗10本の検出 | 1/10 | **8/10** |
+| scoresが動画間で異なる件数 | 6/17 | **12/17** |
+
+常に`LANDED`と答えるダミーでも7/17（41%）になる。TwelveLabs直接はこのダミーに近く、失敗10本中9本を見逃した。一方Novaは失敗8本を検出し、着地失敗ではlandingを0や40へ下げるなどscoresも内容に応じて変化した。計画書§19の中心価値を成立させるにはNovaが必要と判断し、MVPの既定を`bedrock-nova`へ変更した。
+
+スロー撮影別のNova正答はスロー3/5、通常9/12で、スロー撮影は品質差の主因ではなかった。ただし計画書§7の「スローモーション撮影は前提条件」という記述はT10では変更せず、別途再検討する。
 
 ### T9-2 Nova 2 Liteの単体実測（ollie-001）
 
@@ -421,18 +433,30 @@ ValidationException: {"content_type":"application/json","error":{"error_code":40
 
 ### Nova 2 LiteのJP推論プロファイル
 
-AWS公式モデルカードに`jp.amazon.nova-2-lite-v1:0`が存在する。ソースリージョンは東京（`ap-northeast-1`）だけで、送信先は東京と大阪（`ap-northeast-3`）に限定される。ソウル（`ap-northeast-2`）から使えるJPプロファイルは存在しない。現在のソウルS3 URIを直接使う構成ではJPプロファイルへ置き換えられず、日本国内に限定するには動画S3とBedrock呼び出しを東京へ分ける必要がある。既定の`global.amazon.nova-2-lite-v1:0`はソウルから使えるが、APAC外を含む商用リージョンへ処理がルーティングされ得るため、計画書§5の方針とは両立しない。
+AWS公式モデルカードに`jp.amazon.nova-2-lite-v1:0`が存在する。ソースリージョンは東京（`ap-northeast-1`）だけで、送信先は東京と大阪（`ap-northeast-3`）に限定される。ソウル（`ap-northeast-2`）から使えるJPプロファイルは存在しない。17本比較でNovaを既定にしたため、動画S3とBedrock呼び出し元を東京へ移行し、JP推論プロファイルを既定にする。旧GlobalプロファイルはAPAC外へ処理がルーティングされ得るため通常構成では使わない。
 
 - [AWS: Nova 2 Liteの推論IDとリージョン別の利用可能性](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-2-lite.html)
+
+## T10：Nova既定化と東京リージョン移行
+
+| ID | タスク | 状態 |
+| --- | --- | --- |
+| T10-1 | 未設定時の既定を`bedrock-nova`、Nova既定モデルを`jp.amazon.nova-2-lite-v1:0`へ変更。TwelveLabs直接とBedrock Pegasusの選択肢は維持 | **実装・テスト済み** |
+| T10-2 | `.env.example`と設計・評価・IAM文書を東京リージョン／JP推論プロファイルへ更新 | **完了** |
+| T10-3 | 東京バケット作成とCORS、OIDCロールのS3/Bedrock権限、Vercel Production環境変数を更新 | **依頼者作業** |
+
+JP推論プロファイルと東京以外の`AWS_REGION`の組み合わせはコードで拒否する。東京バケットが未作成の段階では実API呼び出しと評価再実行を行わず、T10-3完了後に本番疎通を確認する。
 
 ## H：人間（依頼者）側の作業
 
 | ID | タスク | 理由 |
 | --- | --- | --- |
-| H-1 | 評価動画を10本程度そろえる。**同一トリックの通常撮影版とスローモーション版をペアで**、成功・失敗と撮影角度を混ぜる | 計画書§18の確認項目8・9は最優先だが、現在の2本（KICKFLIP・スロー版なし）では判定できない |
-| H-2 | S3バケット（ソウル）の作成とCORS設定 | T5-0の前提 |
+| H-1 | **完了。** 同一17本の比較セットを用意し、成功・失敗、通常・スローを評価 | T9-3/T9-4の判断材料 |
+| H-2 | 東京S3バケット`tricksight-dev-561143850472-ap-northeast-1-an`の作成とCORS設定 | T10の本番移行前提 |
 | H-3 | Bedrockクォータ申請の進捗共有 | T9の開始判断 |
 | H-4 | **完了。** Pegasus 1.2のAWS Marketplaceサブスクリプションを有効化し、必要なMarketplace権限を設定 | T9-1の実API確認に必要 |
+| H-5 | OIDCロールのS3 ARNを東京バケットへ変更し、Nova JP推論プロファイル用`bedrock:InvokeModel`を追加 | 本番Nova実行に必要 |
+| H-6 | Vercel Productionの`AWS_REGION`、`S3_BUCKET_NAME`、`NOVA_MODEL_ID`、`VIDEO_ANALYSIS_PROVIDER`を東京/Nova設定へ更新 | デプロイ時の設定移行 |
 
 ## 実装順序
 
