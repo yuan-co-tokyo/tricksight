@@ -155,12 +155,20 @@ IAMコンソール → IDプロバイダ → プロバイダを追加 → OpenID
         "s3:DeleteObject"
       ],
       "Resource": "arn:aws:s3:::<S3_BUCKET_NAME>/private/*"
+    },
+    {
+      "Sid": "InvokeBedrockPegasus",
+      "Effect": "Allow",
+      "Action": "bedrock:InvokeModel",
+      "Resource": "arn:aws:bedrock:ap-northeast-2::foundation-model/twelvelabs.pegasus-1-2-v1:0"
     }
   ]
 }
 ```
 
-ブラウザ直接アップロードの署名には`PutObject`、再生・TwelveLabsへの入力URL・`HeadObject`検証には`GetObject`、不正アップロードの後始末には`DeleteObject`が必要である。ランタイムはバケット一覧やCORS変更をしないため、`ListBucket`、`CreateBucket`、`PutBucketCors`は付与しない。`sts:AssumeRoleWithWebIdentity`は上の信頼ポリシーで許可するものであり、権限ポリシーへ追加する必要はない。
+ブラウザ直接アップロードの署名には`PutObject`、再生・TwelveLabsへの入力URL・`HeadObject`検証には`GetObject`、不正アップロードの後始末には`DeleteObject`が必要である。Bedrock Pegasusは同期`InvokeModel`だけを使うため、`InvokeModelWithResponseStream`は付与しない。動画は既存の`private/*`に対する`GetObject`権限で読み取り、同一リージョンのS3 URIを直接渡す。
+
+ランタイムはバケット一覧やCORS変更をしないため、`ListBucket`、`CreateBucket`、`PutBucketCors`は付与しない。`sts:AssumeRoleWithWebIdentity`は上の信頼ポリシーで許可するものであり、権限ポリシーへ追加する必要はない。TwelveLabs直接接続を既定のまま使う間はBedrock文を追加せず、`VIDEO_ANALYSIS_PROVIDER=bedrock-pegasus`へ切り替える前に追加してもよい。
 
 `sub`を`production`だけに限定しているため、Preview Deploymentと`development`（ローカル）はこのロールを引けない。Previewへ本番用ロールを許可すると、Previewコードから本番動画の取得・削除やBedrock呼び出しが可能になるため、MVPでは許可しない。ローカルは次章のアクセスキーを使う。
 
@@ -173,14 +181,22 @@ Vercelプロジェクトの環境変数へ以下を**Production環境だけを�
 ```bash
 AWS_ROLE_ARN=arn:aws:iam::<ACCOUNT_ID>:role/tricksight-vercel-role
 AWS_REGION=ap-northeast-2
+AWS_ACCOUNT_ID=<ACCOUNT_ID>
 S3_BUCKET_NAME=tricksight-videos-<suffix>
 TWELVELABS_API_KEY=<production-api-key>
 TWELVELABS_MODEL_NAME=pegasus1.5
+VIDEO_ANALYSIS_PROVIDER=twelvelabs-direct
 ```
 
 **`AWS_REGION`の明示は必須である。** Vercelは`AWS_REGION`を関数の実行リージョンで自動設定するため、明示しないと東京（`ap-northeast-1`）が入り、ソウルにあるS3とBedrockを呼べなくなる。この構成では関数の実行リージョンとAWS資源のリージョンが意図的に異なるため、必ず上書きする。
 
+**`AWS_ACCOUNT_ID`も必須である。** BedrockへS3 URIを渡すときの`bucketOwner`として使用し、別アカウントのバケットを誤って読ませるconfused deputyを防ぐ。実行時にSTS `GetCallerIdentity`で導出せず設定値にすることで、本番OIDCロールの権限をS3とBedrockだけに維持する。
+
 Productionに`AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY`、`AWS_SESSION_TOKEN`、`VERCEL_OIDC_TOKEN`を手動設定しない。OIDCトークンはVercelがFunctionのリクエストコンテキストへ自動供給する。
+
+`VIDEO_ANALYSIS_PROVIDER`は未設定でも`twelvelabs-direct`になる。Bedrockを有効にするときだけ`bedrock-pegasus`または`bedrock-nova`へ変更し、必要に応じて各モデルIDを設定する。Novaの既定Global推論プロファイルはAPAC外を含む商用リージョンへ処理をルーティングし得るため、本番で選ぶ前にデータ所在地の判断と推論プロファイル用IAM権限の追加が必要である。日本国内限定の`jp.amazon.nova-2-lite-v1:0`は東京だけがソースリージョンで、東京・大阪へルーティングする。現在のソウルS3をそのまま使う構成とは両立しない。
+
+Nova 2 Liteの最新の推論ID・ソース/送信先リージョンは[AWS公式モデルカード](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-2-lite.html)で確認する。
 
 ### 2-4. アプリ側の実装
 

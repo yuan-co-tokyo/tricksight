@@ -81,3 +81,9 @@ Supabaseの停止を避けるGitHub Actionsを使う場合は、Repository secre
 ## 環境変数
 
 DB・認証・AWSを導入する前に、`.env.example`を複製して必要な値を設定します。値の用途は各変数のコメントを参照してください。
+
+動画分析は`VIDEO_ANALYSIS_PROVIDER`で切り替える。未設定または`twelvelabs-direct`では既存のTwelveLabs公式APIを使い、`bedrock-pegasus`または`bedrock-nova`を明示した場合だけAmazon Bedrockを使う。Bedrock経路ではS3動画をpresigned URLへ変換せず、S3 URIをそのままモデルへ渡す。
+
+Bedrock経路では`AWS_ACCOUNT_ID`も必須である。12桁の対象AWSアカウントIDを設定し、S3参照の`bucketOwner`として使用する。本番Vercelにも設定するが、STS権限の追加は不要である。
+
+Novaの既定値`global.amazon.nova-2-lite-v1:0`は、ソウルから呼び出せる一方で動画がAPAC外を含むAWSリージョンへ処理のため転送される可能性があり、「動画データはリージョンを跨がない」という設計方針を満たさない。本番既定へ変更する前にデータ所在地を判断する。

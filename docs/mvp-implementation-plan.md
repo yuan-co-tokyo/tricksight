@@ -436,15 +436,18 @@ interface VideoAnalysisProvider {
 }
 ```
 
-初期実装：
+実装：
 
 ```text
 VideoAnalysisProvider
-├─ BedrockNovaVideoAnalyzer
-└─ BedrockPegasusVideoAnalyzer
+├─ TwelveLabsDirectVideoAnalyzer（既定）
+├─ BedrockPegasusVideoAnalyzer（環境変数で明示時）
+└─ BedrockNovaVideoAnalyzer（環境変数で明示時）
 ```
 
-Phase 0で両方を実装し、比較結果の良かった方をMVPの既定とする。落選した側も削除せず、評価ハーネスから呼べる状態で残す。
+既定は実績のあるTwelveLabs公式API経路を維持し、`VIDEO_ANALYSIS_PROVIDER=bedrock-pegasus`または`bedrock-nova`を明示した場合だけBedrockへ切り替える。Bedrock実装はS3 URIを直接渡し、共通のAWSクライアント設定により本番のVercel OIDCとローカルのSDK既定認証情報チェーンを切り替える。Novaは構造化出力に非対応のため、Markdownコードフェンスをモデル固有の正規化として除去し、それでも生成JSONの構文またはzod検証に失敗した場合だけ1回再試行する。プロバイダー全体の最悪時間は270秒に制限する。Phase 0の比較結果からMVPの既定を決め、落選した側も評価ハーネスから呼べる状態で残す。
+
+NovaのGlobal推論プロファイルは世界中の対応商用リージョンへ処理をルーティングできるため、§5の「動画データはリージョンを跨がない」と両立しない。日本国内限定の`jp.amazon.nova-2-lite-v1:0`は東京をソースとし東京・大阪だけへルーティングするが、ソウルからは利用できない。本番でNovaを採用する場合は、Global利用を明示的に許容するか、動画S3とBedrock呼び出しを東京へ分けるかを決定する。
 
 将来：
 

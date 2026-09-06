@@ -9,7 +9,7 @@
 | T0（ブロッカー解消） | **完了** |
 | T1（分析コアの共通化） | T1-1 / T1-2 / T1-3 完了、T1-4 以降が残り |
 | T2〜T8 | 未着手 |
-| T9（Bedrock解禁後） | 保留 |
+| T9（Bedrock解禁後） | T9-1は調査の上で保留、T9-2は単体実測済み |
 
 完了済みの内訳：
 
@@ -204,9 +204,9 @@ ollie-007 (失敗)  85/80/85/80/85   ← 成功と完全に同一
 
 ## 前提
 
-- **Bedrockは待ち**：AWS Bedrockのクォータ申請中のため、`BedrockNovaVideoAnalyzer` / `BedrockPegasusVideoAnalyzer` は実装しない。
-- **当面の分析はTwelveLabs公式API**：Pegasus 1.5をIndex無しのAsset同期分析で使う（`scripts/eval-twelvelabs.ts` で疎通済み）。
-- 計画書§10の `VideoAnalysisProvider` インターフェースは変更しない。TwelveLabsアダプタが `videoS3Uri` を受け取り、内部でS3のpresigned GET URLを発行して `assets.create({ method: "url" })` に渡す。これによりBedrock解禁時はアダプタ差し替えのみで済む。
+- **既定の分析はTwelveLabs公式API**：Pegasus 1.5をIndex無しのAsset同期分析で使う（`scripts/eval-twelvelabs.ts` で疎通済み）。
+- `VIDEO_ANALYSIS_PROVIDER=bedrock-pegasus`または`bedrock-nova`を明示した場合だけBedrockへ切り替える。未設定時は既存のTwelveLabs直接経路を維持する。
+- 計画書§10の `VideoAnalysisProvider` インターフェースは変更しない。TwelveLabs直接接続はS3のpresigned GET URL、Bedrockは同一リージョンのS3 URIを直接使用する。
 
 ## 現状の棚卸し
 
@@ -380,15 +380,50 @@ ollie-007 (失敗)  85/80/85/80/85   ← 成功と完全に同一
 
 Vercel Runtime Logsで検索する構造化イベント、分析失敗時のDB調査、S3 CloudWatch request metricsとの責務分担、秘密情報をログへ出さない境界は[`operations-logging.md`](./operations-logging.md)にまとめる。
 
-## T9：Bedrock解禁後（保留）
+## T9：Bedrock解禁後
 
 | ID | タスク |
 | --- | --- |
-| T9-1 | `BedrockPegasusVideoAnalyzer` を `VideoAnalysisProvider` 実装として追加 |
-| T9-2 | `BedrockNovaVideoAnalyzer` を追加（プロンプト依存のJSON生成のためパース失敗時リトライを実装） |
+| T9-1 | **実装済み・調査の上で保留。** Marketplace購読権限と`bucketOwner`は解消したが、標準H.264動画2本をBedrock側が処理不能。直接APIで稼働済みのPegasusと冗長なため追加課金を止める |
+| T9-2 | **実装・単体実測済み。** Nova 2 Liteを追加。モデル固有のMarkdownフェンスを除去後、JSON構文・zod検証失敗だけを1秒後に1回再試行し、最大270秒。評価ハーネスも同じ実装を再利用 |
 | T9-3 | 同一動画セットで TwelveLabs公式API / Pegasus on Bedrock / Nova を比較（計画書§18の確認項目9） |
 | T9-4 | 比較結果に基づき既定プロバイダを決定。落選側も評価ハーネスから呼べる状態で残す |
 | T9-5 | 本番のAWSアクセスをVercel OIDC federationへ切り替え |
+
+### T9-2 Nova 2 Liteの単体実測（ollie-001）
+
+NovaはプロンプトでJSONだけを要求してもMarkdownの`json`コードフェンスを付けた。Novaプロバイダー内でフェンスを除去することで共通zodスキーマを通過した。結果はconfidence 0.8、scoresはsetup 60 / pop 40 / bodyBalance 50 / footControl 45 / landing 35だった。scoresはTwelveLabs直接接続の高得点寄りの値とは明確に異なる一方、expectedOutcome=LANDEDに対してBAILEDと判定したため、1件だけではどちらが正確かを決めず14本比較で評価する。
+
+### T9-1 Bedrock版Pegasusの調査結果（保留）
+
+`BedrockPegasusVideoAnalyzer`の実装、Marketplace購読権限、S3 `bucketOwner`指定までは完了している。しかしBedrock Pegasus 1.2は次の入力エラーを返し、JSON Schema評価へ到達しなかった。
+
+```text
+ValidationException: {"content_type":"application/json","error":{"error_code":400,"error_msg":"Unprocessable video, please check the video codec or duration"}}
+```
+
+| sample | 長さ | 解像度 | requestId | 結果 |
+| --- | ---: | --- | --- | --- |
+| ollie-001 | 6.7秒 | 1920x1080 / 1280x720の調査対象群内 | `859f33e1-7896-4a32-b35a-7714a591787f` | 同じ400 |
+| kickflip-004 | 11.8秒 | 1920x1080 / 1280x720の調査対象群内 | `849e6f11-a140-4484-b715-e3e72e4139fe` | 同じ400 |
+
+切り分けで否定できた仮説：
+
+- コーデック：eval動画20本はすべて標準的なH.264（`avc1`）、`brand=mp42`
+- 長さ：6.7秒と最長クラスの11.8秒が同じエラー
+- Content-Type：`video/mp4`
+- S3キー：調査した22オブジェクトすべて`.mp4`拡張子付き
+- 解像度：1920x1080または1280x720で一般的
+
+同じ動画はTwelveLabs直接APIで正常処理できており、動画全般の破損ではなくBedrock経由のPegasus 1.2固有の入力要件が残っていると考えられる。ただし、これ以上は根拠のない総当たりになる。Pegasusは直接API経路ですでに本番稼働しており、Bedrock版は能力的に冗長である一方、新しい比較対象のNovaは動作した。そのためT9-1は**実装漏れではなく、調査の上で追加課金と作業を止めた保留**とする。実装は将来の再挑戦と、Novaと共有するAWS/S3/provider基盤の維持のため残す。
+
+将来再開する場合の未検証項目は、fps、音声トラックの有無・形式、Pegasus固有のリクエストボディ細部である。numeric constraints（`minimum` / `maximum`）の受理可否、confidence、scores、outcomeも動画処理前に拒否されたため未確認のままである。
+
+### Nova 2 LiteのJP推論プロファイル
+
+AWS公式モデルカードに`jp.amazon.nova-2-lite-v1:0`が存在する。ソースリージョンは東京（`ap-northeast-1`）だけで、送信先は東京と大阪（`ap-northeast-3`）に限定される。ソウル（`ap-northeast-2`）から使えるJPプロファイルは存在しない。現在のソウルS3 URIを直接使う構成ではJPプロファイルへ置き換えられず、日本国内に限定するには動画S3とBedrock呼び出しを東京へ分ける必要がある。既定の`global.amazon.nova-2-lite-v1:0`はソウルから使えるが、APAC外を含む商用リージョンへ処理がルーティングされ得るため、計画書§5の方針とは両立しない。
+
+- [AWS: Nova 2 Liteの推論IDとリージョン別の利用可能性](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-2-lite.html)
 
 ## H：人間（依頼者）側の作業
 
@@ -397,6 +432,7 @@ Vercel Runtime Logsで検索する構造化イベント、分析失敗時のDB�
 | H-1 | 評価動画を10本程度そろえる。**同一トリックの通常撮影版とスローモーション版をペアで**、成功・失敗と撮影角度を混ぜる | 計画書§18の確認項目8・9は最優先だが、現在の2本（KICKFLIP・スロー版なし）では判定できない |
 | H-2 | S3バケット（ソウル）の作成とCORS設定 | T5-0の前提 |
 | H-3 | Bedrockクォータ申請の進捗共有 | T9の開始判断 |
+| H-4 | **完了。** Pegasus 1.2のAWS Marketplaceサブスクリプションを有効化し、必要なMarketplace権限を設定 | T9-1の実API確認に必要 |
 
 ## 実装順序
 
