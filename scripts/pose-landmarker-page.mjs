@@ -187,6 +187,8 @@ window.runPoseLandmarker = async ({ videoUrl, mode, fixedFps }) => {
       mode,
       fixedFps: mode === "fixed" ? fixedFps : null,
       durationMs: video.duration * 1_000,
+      videoWidth: video.videoWidth,
+      videoHeight: video.videoHeight,
       initializationMs: initialized.initializationMs,
       processingMs: performance.now() - startedAt,
       presentedFrameGaps: output.presentedFrameGaps,

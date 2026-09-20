@@ -152,4 +152,6 @@ Pose Landmarkerの正規化33点とworld座標から、次を計算した。
 - Workerの進捗、キャンセル、タイムアウトを用意し、失敗しても動画アップロードとLLM分析は続ける
 - 履歴比較では同じ技、撮影速度、サンプルレートの数値だけを比較する
 
-今回確認したのは1台のmacOS、headless Chromium、CPU、MP4だけである。Safari / WebKit、iPhone実機、Android、MOVデコード、GPU delegate、20秒動画、低性能端末は未確認である。製品組み込み前に少なくとも対象ブラウザ実機とMP4/MOVのデコードを別タスクで確認する。
+T11-1で確認したのは1台のmacOS、headless Chromium、CPU、MP4だけである。その後T11-2で、S3に保存されていた実機`kickflip_10.mov`をPlaywright WebKit 26.6でデコードし、固定10fpsと全提示フレームの両方でWorker推論できることを確認した。詳細は[T11-2 骨格機能の設計](t11-2-pose-feature-design.md)に記録する。
+
+Playwright WebKitはiPhone実機Safariの完全な代替ではない。iPhone Safari実機、Android、GPU delegate、20秒動画、低性能端末は引き続き未確認であり、製品組み込み後のリリースゲートとする。

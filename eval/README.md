@@ -86,10 +86,11 @@ Pegasus 1.5では、本番と同じ`TwelveLabsDirectVideoAnalyzer`を使って�
 
 ## MediaPipe Pose Landmarkerを試す
 
-初回だけheadless Chromiumを用意する。
+初回だけ評価に使うブラウザを用意する。既定はChromiumで、WebKit評価時はWebKitもインストールする。
 
 ```bash
 pnpm exec playwright install chromium
+pnpm exec playwright install webkit
 ```
 
 引数なしは成功3本・失敗3本のパイロット、`--all`はmanifestの全件を対象にする。各動画について固定10fpsを2回実行して再現性を測り、続けてブラウザが提示する全フレームを1回処理する。
@@ -98,9 +99,10 @@ pnpm exec playwright install chromium
 pnpm eval:pose
 pnpm eval:pose -- --all
 pnpm eval:pose -- --sample ollie-001
+pnpm eval:pose -- --browser webkit --sample ollie-001
 ```
 
-評価はNode.jsからheadless Chromiumを起動し、ブラウザ内のmodule Web Workerで`@mediapipe/tasks-vision`、WASM、CPU delegateを実行する。モデルはversion付きURLから初回だけ`eval/mediapipe-cache/`へ取得し、SHA-256を検証する。動画、モデルキャッシュ、詳細結果`eval/output/pose-landmarker-*.json`はGit管理しない。
+評価はNode.jsからheadless ChromiumまたはWebKitを起動し、ブラウザ内のmodule Web Workerで`@mediapipe/tasks-vision`、WASM、CPU delegateを実行する。`--browser`を省略した場合はChromiumを使う。モデルはversion付きURLから初回だけ`eval/mediapipe-cache/`へ取得し、SHA-256を検証する。動画、モデルキャッシュ、詳細結果`eval/output/pose-landmarker-*.json`はGit管理しない。
 
 固定10fpsでpose検出率と下半身検出率がともに80%以上の動画だけを判定可能層とする。この閾値は全17本の群差を見る前に固定した。詳細な設計、実測値、限界は[Pose Landmarker実現可能性レポート](../docs/phase0-pose-landmarker-feasibility.md)を参照する。
 

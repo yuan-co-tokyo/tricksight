@@ -56,6 +56,8 @@ function run(frames: PoseFrame[]): PoseRun {
     mode: "fixed",
     fixedFps: 10,
     durationMs: 1_000,
+    videoWidth: 1_920,
+    videoHeight: 1_080,
     initializationMs: 100,
     processingMs: 500,
     presentedFrameGaps: 0,

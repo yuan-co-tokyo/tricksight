@@ -17,6 +17,8 @@ export type PoseRun = {
   mode: "fixed" | "all-frames";
   fixedFps: number | null;
   durationMs: number;
+  videoWidth: number;
+  videoHeight: number;
   initializationMs: number;
   processingMs: number;
   presentedFrameGaps: number;

@@ -1,4 +1,4 @@
-import { chromium, type Page } from "@playwright/test";
+import { chromium, webkit, type Page } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import {
@@ -33,6 +33,7 @@ const MODEL_CACHE_PATH = resolve(
 );
 const OUTPUT_DIRECTORY = resolve("eval/output");
 const DEFAULT_FIXED_FPS = 10;
+const browserNameSchema = z.enum(["chromium", "webkit"]);
 const PILOT_SAMPLE_IDS = [
   "ollie-001",
   "ollie-003",
@@ -64,6 +65,7 @@ type Arguments = {
   manifestPath: string;
   selection: "pilot" | "all" | "sample";
   sampleId?: string;
+  browserName: z.infer<typeof browserNameSchema>;
   fixedFps: number;
   includeAllFrames: boolean;
 };
@@ -101,11 +103,15 @@ function parseArguments(): Arguments {
   const fixedFps = fixedFpsValue
     ? z.coerce.number().int().min(1).max(60).parse(fixedFpsValue)
     : DEFAULT_FIXED_FPS;
+  const browserName = browserNameSchema.parse(
+    argumentValue("--browser") ?? "chromium",
+  );
 
   return {
     manifestPath: argumentValue("--manifest") ?? "eval/manifest.json",
     selection: sampleId ? "sample" : all ? "all" : "pilot",
     sampleId,
+    browserName,
     fixedFps,
     includeAllFrames: !process.argv.includes("--skip-all-frames"),
   };
@@ -358,10 +364,16 @@ async function main() {
     await readFile(resolve("node_modules/@playwright/test/package.json"), "utf8"),
   ) as { version: string };
   const server = await startServer(samples, model.path);
-  const browser = await chromium.launch({
-    headless: true,
-    args: ["--autoplay-policy=no-user-gesture-required"],
-  });
+  const browserType = arguments_.browserName === "webkit" ? webkit : chromium;
+  const browser = await browserType.launch(
+    arguments_.browserName === "chromium"
+      ? {
+          headless: true,
+          args: ["--autoplay-policy=no-user-gesture-required"],
+        }
+      : { headless: true },
+  );
+  const browserVersion = browser.version();
   const page = await browser.newPage();
   page.setDefaultTimeout(0);
   page.on("console", (message) => console.log(`[browser:${message.type()}] ${message.text()}`));
@@ -506,7 +518,8 @@ async function main() {
   const output = {
     generatedAt: new Date().toISOString(),
     environment: {
-      browser: "chromium",
+      browser: arguments_.browserName,
+      browserVersion,
       playwrightVersion: playwrightPackage.version,
       mediapipeTasksVisionVersion: mediapipePackage.version,
       model: {
