@@ -20,6 +20,7 @@
     "db:verify-runtime": "node --env-file=.env.local --import tsx scripts/verify-database.ts --runtime-only",
     "auth:schema": "node --env-file=.env.local node_modules/auth/dist/index.mjs generate --config ./lib/auth.ts --output ./lib/db/schema/auth.ts --yes",
     "eval": "node --env-file=.env.local --import tsx scripts/eval-video.ts",
+    "eval:pose": "node --import tsx scripts/eval-pose-landmarker.ts",
     "eval:twelvelabs": "node --env-file=.env.local --import tsx scripts/eval-twelvelabs.ts",
     "verify:twelvelabs": "node --env-file=.env.local --import tsx scripts/verify-twelvelabs.ts",
     "verify:aws": "node --env-file=.env.local --import tsx scripts/verify-aws.ts"
@@ -49,6 +50,8 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@mediapipe/tasks-vision": "1.0.1",
+    "@playwright/test": "1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/pg": "^8.21.0",

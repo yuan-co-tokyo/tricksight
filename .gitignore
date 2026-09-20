@@ -39,6 +39,7 @@ yarn-error.log*
 /eval/input/
 /eval/output/
 /eval/manifest.json
+/eval/mediapipe-cache/
 /eval/twelvelabs-assets.json
 
 # vercel
