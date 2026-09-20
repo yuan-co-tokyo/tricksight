@@ -86,7 +86,7 @@ function novaResponse(text: string | null, stopReason = "end_turn") {
 function createProvider(overrides: Partial<BedrockNovaConfig> = {}) {
   return new BedrockNovaVideoAnalyzer(
     {
-      awsRegion: "ap-northeast-1",
+      awsRegion: "ap-northeast-2",
       awsAccountId: "123456789012",
       s3Bucket: "tricksight-videos",
       attemptTimeoutMs: 1_000,
@@ -134,15 +134,21 @@ describe("BedrockNovaVideoAnalyzer", () => {
     mocks.send.mockResolvedValue(novaResponse(JSON.stringify(validResult)));
   });
 
+  it("既定モデルをソウルから使えるGlobal推論プロファイルに固定する", () => {
+    expect(DEFAULT_BEDROCK_NOVA_MODEL_ID).toBe(
+      "global.amazon.nova-2-lite-v1:0",
+    );
+  });
+
   it("env helperでリージョン、bucket、既定の推論プロファイルを解決する", () => {
     expect(
       createBedrockNovaConfigFromEnv({
-        AWS_REGION: " ap-northeast-1 ",
+        AWS_REGION: " ap-northeast-2 ",
         AWS_ACCOUNT_ID: " 123456789012 ",
         S3_BUCKET_NAME: " tricksight-videos ",
       }),
     ).toEqual({
-      awsRegion: "ap-northeast-1",
+      awsRegion: "ap-northeast-2",
       awsAccountId: "123456789012",
       s3Bucket: "tricksight-videos",
       modelId: DEFAULT_BEDROCK_NOVA_MODEL_ID,
@@ -157,24 +163,27 @@ describe("BedrockNovaVideoAnalyzer", () => {
     createProvider();
 
     expect(mocks.client).toHaveBeenCalledWith({
-      region: "ap-northeast-1",
+      region: "ap-northeast-2",
       maxAttempts: 1,
     });
   });
 
   it("JP推論プロファイルを東京以外から呼ぶ設定を拒否する", () => {
-    expect(() => createProvider({ awsRegion: "ap-northeast-2" })).toThrow(
-      "JP inference profiles require AWS_REGION=ap-northeast-1",
-    );
+    expect(() =>
+      createProvider({
+        awsRegion: "ap-northeast-2",
+        modelId: "jp.amazon.nova-2-lite-v1:0",
+      }),
+    ).toThrow("JP inference profiles require AWS_REGION=ap-northeast-1");
   });
 
   it("NOVA_MODEL_IDで別の推論プロファイルを指定できる", () => {
     const provider = createProvider({
-      awsRegion: "ap-northeast-2",
-      modelId: "global.amazon.nova-2-lite-v1:0",
+      awsRegion: "ap-northeast-1",
+      modelId: "jp.amazon.nova-2-lite-v1:0",
     });
 
-    expect(provider.modelId).toBe("global.amazon.nova-2-lite-v1:0");
+    expect(provider.modelId).toBe("jp.amazon.nova-2-lite-v1:0");
   });
 
   it("基盤モデルIDを拒否して推論プロファイルを要求する", () => {

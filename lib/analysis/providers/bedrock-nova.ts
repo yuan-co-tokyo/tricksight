@@ -27,9 +27,10 @@ import {
 } from "../schema";
 
 export const DEFAULT_BEDROCK_NOVA_MODEL_ID =
-  "jp.amazon.nova-2-lite-v1:0";
+  "global.amazon.nova-2-lite-v1:0";
 // Nova 2 LiteはPegasusと異なり、オンデマンド呼び出しにも
-// 基盤モデルIDではなく推論プロファイルIDが必要。
+// 基盤モデルIDではなく推論プロファイルIDが必要。既定はソウルから
+// 利用できるGlobalで、JPへ切り替える場合は東京リージョンを必須とする。
 
 const DEFAULT_MAX_TOKENS = 2_000;
 const DEFAULT_MAX_ANALYSIS_ATTEMPTS = 2;

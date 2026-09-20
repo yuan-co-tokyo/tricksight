@@ -147,7 +147,7 @@ T1-6-fix1 で `error_message` にAPIエラー本文を保存する対応を入�
 
 Vercel Production に設定されているのは `DATABASE_URL` / `BETTER_AUTH_SECRET` / `BETTER_AUTH_URL` のみ。`S3_BUCKET_NAME` / `AWS_REGION` / AWS認証情報が無いため、**本番では動画アップロードが動作しない**（2026-08-18 に実機で確認）。
 
-ただし §5・§15 により本番へ静的アクセスキーを置くことはできない。Vercel OIDC federationのアプリ側実装は完了したが、実環境のOIDCロールには`bedrock:InvokeModel`がまだ付与されていない。東京バケット作成、ランタイムポリシー更新、Vercel環境変数更新の後に本番通し確認を行う。
+ただし §5・§15 により本番へ静的アクセスキーを置くことはできない。Vercel OIDC federationのアプリ側実装は完了したが、実環境のOIDCロールには`bedrock:InvokeModel`がまだ付与されていない。ソウルバケット、Global Nova用ランタイムポリシー、Vercel環境変数を整合させた後に本番通し確認を行う。
 
 ### 評価結果（2026-08-18、14サンプル）
 
@@ -194,7 +194,7 @@ ollie-007 (失敗)  85/80/85/80/85   ← 成功と完全に同一
 
 | 課題 | 内容 |
 | --- | --- |
-| **本番AWS移行** | 東京バケット作成、CORS設定、OIDCロールへのS3東京バケット権限とNova用`bedrock:InvokeModel`付与、Vercel環境変数更新が必要 |
+| **本番AWS設定** | ソウルバケットのCORS確認、OIDCロールのS3 ARNをソウルへ戻すこと、Global Nova用`bedrock:InvokeModel`付与、Vercel環境変数更新が必要 |
 | B-1 confidence範囲外 | **修正済み。** confidenceの0〜1尺度を`common-system-v2`に明記し、14本すべてschema通過 |
 | B-2 失敗時のraw_response | **修正済み。** 出力検証失敗時もマスク済み診断envelopeを保存し、クライアントには非公開 |
 | B-3 署名失敗時のゴミ行 | 失敗のたびに PENDING_UPLOAD の行が増える |
@@ -204,7 +204,7 @@ ollie-007 (失敗)  85/80/85/80/85   ← 成功と完全に同一
 
 ## 前提
 
-- **既定の分析はBedrock Nova 2 Lite**：未設定時は`bedrock-nova`を選び、東京から`jp.amazon.nova-2-lite-v1:0`を呼ぶ。
+- **既定の分析はBedrock Nova 2 Lite**：未設定時は`bedrock-nova`を選び、ソウルから`global.amazon.nova-2-lite-v1:0`を呼ぶ。
 - `VIDEO_ANALYSIS_PROVIDER=twelvelabs-direct`でTwelveLabs公式APIへ切り戻せる。`bedrock-pegasus`の実装も調査再開用に維持する。
 - 計画書§10の `VideoAnalysisProvider` インターフェースは変更しない。TwelveLabs直接接続はS3のpresigned GET URL、Bedrockは同一リージョンのS3 URIを直接使用する。
 
@@ -318,7 +318,7 @@ ollie-007 (失敗)  85/80/85/80/85   ← 成功と完全に同一
 
 | ID | タスク | 完了条件 |
 | --- | --- | --- |
-| T5-0 | S3バケット（東京）作成とCORS設定。`docs/aws-iam-setup.md` へ手順追記 | **人間の作業**。バケット非公開 |
+| T5-0 | S3バケット（ソウル）作成とCORS設定。`docs/aws-iam-setup.md` へ手順追記 | **人間の作業**。バケット非公開 |
 | T5-1 | Presigned POST 発行 Route Handler。キー完全一致・`content-length-range` 100MB・Content-Type完全一致（mp4/quicktime）・有効期限5分をポリシーに含める | ポリシー条件をテストで確認 |
 | T5-2 | ブラウザ直アップロード＋進捗表示＋動画プレビュー＋長さ3〜20秒のクライアント検証 | — |
 | T5-3 | アップロード完了通知API。`HeadObject` でキー・サイズ・Content-Typeを再検証し、DB上のユーザーIDとキーの対応も照合。失敗したオブジェクトは削除 | 別ユーザーのキーを指定すると拒否される |
@@ -433,30 +433,33 @@ ValidationException: {"content_type":"application/json","error":{"error_code":40
 
 ### Nova 2 LiteのJP推論プロファイル
 
-AWS公式モデルカードに`jp.amazon.nova-2-lite-v1:0`が存在する。ソースリージョンは東京（`ap-northeast-1`）だけで、送信先は東京と大阪（`ap-northeast-3`）に限定される。ソウル（`ap-northeast-2`）から使えるJPプロファイルは存在しない。17本比較でNovaを既定にしたため、動画S3とBedrock呼び出し元を東京へ移行し、JP推論プロファイルを既定にする。旧GlobalプロファイルはAPAC外へ処理がルーティングされ得るため通常構成では使わない。
+AWS公式モデルカードに`jp.amazon.nova-2-lite-v1:0`が存在する。ソースリージョンは東京（`ap-northeast-1`）だけで、送信先は東京と大阪（`ap-northeast-3`）に限定される。ソウル（`ap-northeast-2`）から使えるJPプロファイルは存在しない。17本比較でNovaを既定にした後、動画を日本国内に留めるため東京移行を決めたが、このAWSアカウントでは東京のクォータ引き上げが承認されなかった。代替として東京のAPAC Nova Lite、In-Region Nova Lite、APAC Nova Proも確認したが、いずれも枠を利用できなかった。
+
+ソウルの`global.amazon.nova-2-lite-v1:0`は利用できるため、リージョンだけをソウルへ戻す。Global推論はAPAC外を含むAWS商用リージョンへ処理をルーティングし得る。依頼者本人の動画だけを扱うMVP検証段階ではこのリスクを受容するが、第三者ユーザーの動画を受け入れる前に再検討する。JPプロファイル対応と東京整合チェックは残し、東京クォータが承認されたらアプリコードを変えず環境変数で再移行できる状態を維持する。
 
 - [AWS: Nova 2 Liteの推論IDとリージョン別の利用可能性](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-2-lite.html)
 
-## T10：Nova既定化と東京リージョン移行
+## T10 / T10-revert：Nova既定化とリージョン判断
 
 | ID | タスク | 状態 |
 | --- | --- | --- |
-| T10-1 | 未設定時の既定を`bedrock-nova`、Nova既定モデルを`jp.amazon.nova-2-lite-v1:0`へ変更。TwelveLabs直接とBedrock Pegasusの選択肢は維持 | **実装・テスト済み** |
-| T10-2 | `.env.example`と設計・評価・IAM文書を東京リージョン／JP推論プロファイルへ更新 | **完了** |
-| T10-3 | 東京バケット作成とCORS、OIDCロールのS3/Bedrock権限、Vercel Production環境変数を更新 | **依頼者作業** |
+| T10-1 | 未設定時の既定を`bedrock-nova`へ変更。TwelveLabs直接とBedrock Pegasusの選択肢は維持 | **実装・テスト済み** |
+| T10-2 | JP推論で国内処理に限定するため東京移行を設計 | **クォータ不承認により撤回** |
+| T10-3 | ソウルのGlobal推論へ既定を戻し、JPプロファイル対応と東京整合チェックは将来用に維持 | **実装・テスト済み** |
+| T10-4 | ソウルバケットのCORS、OIDCロールのS3/Bedrock権限、Vercel Production環境変数を整合 | **依頼者作業** |
 
-JP推論プロファイルと東京以外の`AWS_REGION`の組み合わせはコードで拒否する。東京バケットが未作成の段階では実API呼び出しと評価再実行を行わず、T10-3完了後に本番疎通を確認する。
+既定は`AWS_REGION=ap-northeast-2`、`NOVA_MODEL_ID=global.amazon.nova-2-lite-v1:0`とする。JP推論プロファイルと東京以外の`AWS_REGION`の組み合わせは引き続きコードで拒否する。T10-revertでは実API呼び出しと評価再実行を行わず、leaderが別途`pnpm verify:aws`でソウルGlobal推論の疎通を確認済みである。
 
 ## H：人間（依頼者）側の作業
 
 | ID | タスク | 理由 |
 | --- | --- | --- |
 | H-1 | **完了。** 同一17本の比較セットを用意し、成功・失敗、通常・スローを評価 | T9-3/T9-4の判断材料 |
-| H-2 | 東京S3バケット`tricksight-dev-561143850472-ap-northeast-1-an`の作成とCORS設定 | T10の本番移行前提 |
-| H-3 | Bedrockクォータ申請の進捗共有 | T9の開始判断 |
+| H-2 | ソウルS3バケット`tricksight-dev-561143850472-ap-northeast-2-an`のCORS確認 | 本番動画アップロードの前提 |
+| H-3 | **完了。** 東京のNova 2 Liteクォータ引き上げは不承認。ソウルGlobal推論の利用枠を確認 | T10のリージョン再判断 |
 | H-4 | **完了。** Pegasus 1.2のAWS Marketplaceサブスクリプションを有効化し、必要なMarketplace権限を設定 | T9-1の実API確認に必要 |
-| H-5 | OIDCロールのS3 ARNを東京バケットへ変更し、Nova JP推論プロファイル用`bedrock:InvokeModel`を追加 | 本番Nova実行に必要 |
-| H-6 | Vercel Productionの`AWS_REGION`、`S3_BUCKET_NAME`、`NOVA_MODEL_ID`、`VIDEO_ANALYSIS_PROVIDER`を東京/Nova設定へ更新 | デプロイ時の設定移行 |
+| H-5 | OIDCロールのS3 ARNをソウルバケットへ戻し、Nova Global推論プロファイル用`bedrock:InvokeModel`を追加・維持 | 本番Nova実行に必要 |
+| H-6 | Vercel Productionの`AWS_REGION`、`S3_BUCKET_NAME`、`NOVA_MODEL_ID`、`VIDEO_ANALYSIS_PROVIDER`をソウル/Global Nova設定へ更新 | デプロイ時の設定整合 |
 
 ## 実装順序
 

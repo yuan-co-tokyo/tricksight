@@ -86,4 +86,4 @@ DB・認証・AWSを導入する前に、`.env.example`を複製して必要な�
 
 Bedrock経路では`AWS_ACCOUNT_ID`も必須である。12桁の対象AWSアカウントIDを設定し、S3参照の`bucketOwner`として使用する。本番Vercelにも設定するが、STS権限の追加は不要である。
 
-Novaの既定値は`jp.amazon.nova-2-lite-v1:0`である。このJP推論プロファイルは東京（`ap-northeast-1`）からだけ呼び出せ、処理先は東京・大阪に限定される。`AWS_REGION`と`S3_BUCKET_NAME`も東京へそろえる必要があり、コードはJPプロファイルと東京以外のリージョンの組み合わせを拒否する。
+Novaの既定値は、ソウル（`ap-northeast-2`）から呼び出す`global.amazon.nova-2-lite-v1:0`である。Global推論ではAPAC外を含むAWS商用リージョンへ処理がルーティングされ得るため、依頼者本人の動画だけを扱うMVP検証段階に限定して受容する。第三者の動画を受け入れる前にデータ所在地を再検討する。将来東京のクォータが利用可能になった場合は、`NOVA_MODEL_ID=jp.amazon.nova-2-lite-v1:0`と`AWS_REGION=ap-northeast-1`へ変更でき、コードはJPプロファイルと東京以外のリージョンの組み合わせを拒否する。
