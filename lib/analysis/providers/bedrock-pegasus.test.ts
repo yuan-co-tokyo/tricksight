@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   client: vi.fn(),
   command: vi.fn(),
   send: vi.fn(),
+  resolveVideoFormat: vi.fn(),
 }));
 
 vi.mock("@aws-sdk/client-bedrock-runtime", () => ({
@@ -87,18 +88,22 @@ function responseBody(body: unknown) {
 }
 
 function createProvider(overrides: Partial<BedrockPegasusConfig> = {}) {
-  return new BedrockPegasusVideoAnalyzer({
-    awsRegion: "ap-northeast-2",
-    awsAccountId: "123456789012",
-    s3Bucket: "tricksight-videos",
-    timeoutMs: 1_000,
-    ...overrides,
-  });
+  return new BedrockPegasusVideoAnalyzer(
+    {
+      awsRegion: "ap-northeast-2",
+      awsAccountId: "123456789012",
+      s3Bucket: "tricksight-videos",
+      timeoutMs: 1_000,
+      ...overrides,
+    },
+    { videoFormatResolver: { resolve: mocks.resolveVideoFormat } },
+  );
 }
 
 describe("BedrockPegasusVideoAnalyzer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.resolveVideoFormat.mockResolvedValue("mp4");
     mocks.send.mockResolvedValue(
       responseBody({
         message: JSON.stringify(validResult),
@@ -151,6 +156,25 @@ describe("BedrockPegasusVideoAnalyzer", () => {
         videoS3Uri: "s3://another-bucket/private/example.mp4",
       }),
     ).rejects.toMatchObject({ code: "BUCKET_MISMATCH" });
+    expect(mocks.resolveVideoFormat).not.toHaveBeenCalled();
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it("判定不能な実ファイルをBedrock呼び出し前に拒否する", async () => {
+    mocks.resolveVideoFormat.mockRejectedValueOnce(
+      new VideoAnalysisError(
+        "UNSUPPORTED_VIDEO_FORMAT",
+        "ftypボックスを検出できませんでした。",
+      ),
+    );
+    const provider = createProvider();
+
+    await expect(
+      provider.analyze({
+        ...defaultInput,
+        videoS3Uri: "s3://tricksight-videos/private/example.mov",
+      }),
+    ).rejects.toMatchObject({ code: "UNSUPPORTED_VIDEO_FORMAT" });
     expect(mocks.send).not.toHaveBeenCalled();
   });
 
@@ -193,6 +217,10 @@ describe("BedrockPegasusVideoAnalyzer", () => {
     expect(mocks.send.mock.calls[0]?.[1]).toEqual({
       abortSignal: expect.any(AbortSignal),
     });
+    expect(mocks.resolveVideoFormat).toHaveBeenCalledWith(
+      "tricksight-videos",
+      "private/example.mp4",
+    );
     expect(output).toEqual({
       result: validResult,
       rawResponse: {

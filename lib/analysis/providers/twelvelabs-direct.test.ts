@@ -259,6 +259,30 @@ describe("TwelveLabsDirectVideoAnalyzer", () => {
     );
   });
 
+  it("MOVもformat指定せずpresigned URLからAssetへ渡す", async () => {
+    const provider = createProvider();
+
+    await provider.analyze({
+      ...defaultInput,
+      videoS3Uri: "s3://tricksight-videos/uploads/kickflip_10.mov",
+    });
+
+    expect(mocks.getObjectCommand).toHaveBeenCalledWith({
+      Bucket: "tricksight-videos",
+      Key: "uploads/kickflip_10.mov",
+    });
+    expect(mocks.assetCreate).toHaveBeenCalledWith({
+      method: "url",
+      url: "https://signed.example/video.mp4",
+    });
+    expect(mocks.analyze).toHaveBeenCalledWith(
+      expect.objectContaining({
+        video: { type: "asset_id", assetId: "asset-123" },
+      }),
+      expect.anything(),
+    );
+  });
+
   it("検証済み結果、生レスポンス、複合promptVersionを返す", async () => {
     const rawResponse = {
       id: "analysis-123",

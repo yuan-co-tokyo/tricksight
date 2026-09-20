@@ -199,7 +199,7 @@ IAMコンソール → IDプロバイダ → プロバイダを追加 → OpenID
 }
 ```
 
-ブラウザ直接アップロードの署名には`PutObject`、再生・TwelveLabsへの入力URL・`HeadObject`検証には`GetObject`、不正アップロードの後始末には`DeleteObject`が必要である。NovaはConverse APIを非ストリーミングで使うため、必要なアクションは`bedrock:InvokeModel`だけである。AWSのGlobalクロスリージョン推論では、ソウルの推論プロファイル、ソウルの基盤モデル、リージョンなしのGlobal基盤モデルという3リソースを許可する必要がある。基盤モデル側には`bedrock:InferenceProfileArn`条件を付け、指定したGlobalプロファイルを介さない直接呼び出しを防ぐ。Global基盤モデルの`aws:RequestedRegion`が`unspecified`になるのはAWSの仕様である。
+ブラウザ直接アップロードの署名には`PutObject`、再生・TwelveLabsへの入力URL・`HeadObject`検証、Bedrock分析前の先頭4KiB Range取得には`GetObject`、不正アップロードの後始末には`DeleteObject`が必要である。Range付き`GetObject`にも追加のS3アクションは不要で、既存の`private/*`に対する`s3:GetObject`で足りる。NovaはConverse APIを非ストリーミングで使うため、必要なアクションは`bedrock:InvokeModel`だけである。AWSのGlobalクロスリージョン推論では、ソウルの推論プロファイル、ソウルの基盤モデル、リージョンなしのGlobal基盤モデルという3リソースを許可する必要がある。基盤モデル側には`bedrock:InferenceProfileArn`条件を付け、指定したGlobalプロファイルを介さない直接呼び出しを防ぐ。Global基盤モデルの`aws:RequestedRegion`が`unspecified`になるのはAWSの仕様である。
 
 ランタイムはバケット一覧やCORS変更をしないため、`ListBucket`、`CreateBucket`、`PutBucketCors`は付与しない。`sts:AssumeRoleWithWebIdentity`は上の信頼ポリシーで許可するものであり、権限ポリシーへ追加する必要はない。Bedrock Pegasusは調査保留中で本番既定ではないため、このランタイムポリシーには権限を付与しない。実装自体は残っており、将来再開する場合は対象リージョンとモデルARNを確認して別途追加する。
 

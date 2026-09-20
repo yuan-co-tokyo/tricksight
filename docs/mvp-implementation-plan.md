@@ -242,6 +242,7 @@ Next.jsホスティングの移行先はコンテナ（App Runner等）または
 4. アップロード完了をAPIへ通知
 5. APIが`HeadObject`でオブジェクトの存在、キー、サイズ、Content-Typeを再検証
 6. 検証に失敗したオブジェクトは削除し、成功した場合のみ分析処理を開始
+7. Bedrock分析の開始時にS3 `GetObject`のRange取得で先頭4KiBだけを読み、ISO BMFFの`ftyp` major brandからMP4/MOVを判定
 
 Presigned POSTのポリシーには次の条件を必ず含め、クライアント側の検証だけに依存しない。
 
@@ -251,6 +252,8 @@ Presigned POSTのポリシーには次の条件を必ず含め、クライアン
 - 有効期限は5分以内
 
 Presigned POSTは有効期限内で再利用できるため、キーは推測困難なUUIDで発行する。分析開始前の`HeadObject`検証ではDBに保存したユーザーIDとオブジェクトキーの対応も確認し、別ユーザーのキーを指定できないようにする。
+
+拡張子とブラウザ宣言のContent-Typeは実コンテナと一致する保証がない。実際に`.mov` / `video/quicktime`としてアップロードされた動画の中身が`mp42`だったため、Bedrockへ渡すformatは実ファイルだけから決める。`qt  `はMOV、既知のISO/MP4 brand（`isom`、`mp41`、`mp42`、`avc1`など）はMP4とする。`ftyp`が無い、またはmajor brandが未知の場合は拡張子へフォールバックせず分析を拒否する。誤ったformatで有料推論を呼ぶことと、クライアント自己申告を再び信頼境界に入れることを避けるためである。
 
 ### 動画制限
 
@@ -692,6 +695,7 @@ Electric Cyanは以下に限定して使う。
 - MIMEタイプと拡張子を検証
 - アップロードには上限100MBを強制したPresigned POSTを使い、有効期限を5分以内にする
 - アップロード完了後、分析前に`HeadObject`でキー、サイズ、Content-Typeを再検証し、DBでキーと所有者の対応を確認する
+- Bedrock分析時はS3先頭4KiBの`ftyp`を検査し、拡張子や宣言Content-Typeではなく実コンテナからformatを決める
 - ユーザーごとにS3パスを分離する
 - APIですべて所有者チェックを行う
 - AWSアクセスにはこのプロジェクト専用のIAMを作り、権限をBedrock呼び出しと対象S3バケットに最小化する

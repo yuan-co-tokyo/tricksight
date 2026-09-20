@@ -25,6 +25,10 @@ import {
   skateAnalysisResultJsonSchema,
   skateAnalysisResultSchema,
 } from "../schema";
+import {
+  S3VideoFormatResolver,
+  type VideoFormatResolver,
+} from "../video-container";
 
 export const DEFAULT_BEDROCK_PEGASUS_MODEL_ID =
   "twelvelabs.pegasus-1-2-v1:0";
@@ -145,13 +149,23 @@ export class BedrockPegasusVideoAnalyzer implements VideoAnalysisProvider {
 
   private readonly client: BedrockPegasusClient;
   private readonly config: ResolvedBedrockPegasusConfig;
+  private readonly videoFormatResolver: VideoFormatResolver;
 
   constructor(
     config: BedrockPegasusConfig,
-    dependencies: { client?: BedrockPegasusClient } = {},
+    dependencies: {
+      client?: BedrockPegasusClient;
+      videoFormatResolver?: VideoFormatResolver;
+    } = {},
   ) {
     this.config = resolveConfig(config);
     this.modelId = this.config.modelId;
+    this.videoFormatResolver =
+      dependencies.videoFormatResolver ??
+      new S3VideoFormatResolver({
+        awsRegion: this.config.awsRegion,
+        awsAccountId: this.config.awsAccountId,
+      });
     this.client =
       dependencies.client ??
       new BedrockRuntimeClient({
@@ -165,13 +179,17 @@ export class BedrockPegasusVideoAnalyzer implements VideoAnalysisProvider {
       throw new UnsupportedPromptVersionError(input.promptVersion);
     }
 
-    const { bucket } = parseVideoS3Uri(input.videoS3Uri);
+    const { bucket, key } = parseVideoS3Uri(input.videoS3Uri);
     if (bucket !== this.config.s3Bucket) {
       throw new VideoAnalysisError(
         "BUCKET_MISMATCH",
         `許可されていないS3バケットです: ${bucket}`,
       );
     }
+
+    // Pegasusのリクエストにはformatフィールドがないが、実ファイルが対応する
+    // ISO BMFFコンテナかを同じ境界で検証し、拡張子やContent-Typeに依存しない。
+    await this.videoFormatResolver.resolve(bucket, key);
 
     const resolvedPrompt = resolveVideoAnalysisPrompt(input);
     const response = await this.invokeModel(input.videoS3Uri, resolvedPrompt.prompt);

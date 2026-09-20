@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   command: vi.fn(),
   send: vi.fn(),
   sleep: vi.fn(),
+  resolveVideoFormat: vi.fn(),
 }));
 
 vi.mock("@aws-sdk/client-bedrock-runtime", () => ({
@@ -93,7 +94,10 @@ function createProvider(overrides: Partial<BedrockNovaConfig> = {}) {
       retryDelayMs: 10,
       ...overrides,
     },
-    { sleep: mocks.sleep },
+    {
+      sleep: mocks.sleep,
+      videoFormatResolver: { resolve: mocks.resolveVideoFormat },
+    },
   );
 }
 
@@ -131,6 +135,7 @@ describe("BedrockNovaVideoAnalyzer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.sleep.mockResolvedValue(undefined);
+    mocks.resolveVideoFormat.mockResolvedValue("mp4");
     mocks.send.mockResolvedValue(novaResponse(JSON.stringify(validResult)));
   });
 
@@ -211,7 +216,7 @@ describe("BedrockNovaVideoAnalyzer", () => {
     expect(mocks.send).not.toHaveBeenCalled();
   });
 
-  it("bucketと動画形式をSDK呼び出し前に検証する", async () => {
+  it("bucketと実ファイル形式をSDK呼び出し前に検証する", async () => {
     const provider = createProvider();
 
     await expect(
@@ -220,13 +225,40 @@ describe("BedrockNovaVideoAnalyzer", () => {
         videoS3Uri: "s3://another-bucket/private/example.mp4",
       }),
     ).rejects.toMatchObject({ code: "BUCKET_MISMATCH" });
+    mocks.resolveVideoFormat.mockRejectedValueOnce(
+      new VideoAnalysisError(
+        "UNSUPPORTED_VIDEO_FORMAT",
+        "ftypボックスを検出できませんでした。",
+      ),
+    );
     await expect(
       provider.analyze({
         ...defaultInput,
-        videoS3Uri: "s3://tricksight-videos/private/example.webm",
+        videoS3Uri: "s3://tricksight-videos/private/example.mov",
       }),
     ).rejects.toMatchObject({ code: "UNSUPPORTED_VIDEO_FORMAT" });
+    expect(mocks.resolveVideoFormat).toHaveBeenCalledOnce();
+    expect(mocks.resolveVideoFormat).toHaveBeenCalledWith(
+      "tricksight-videos",
+      "private/example.mov",
+    );
     expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it(".movキーでも実コンテナがMP4ならformat=mp4を渡す", async () => {
+    const provider = createProvider();
+
+    await provider.analyze({
+      ...defaultInput,
+      videoS3Uri: "s3://tricksight-videos/private/kickflip_10.mov",
+    });
+
+    const commandInput = mocks.command.mock.calls[0]?.[0] as {
+      messages: Array<{
+        content: Array<{ video?: { format: string } }>;
+      }>;
+    };
+    expect(commandInput.messages[0]?.content[0]?.video?.format).toBe("mp4");
   });
 
   it("S3 URIとJSON Schema文字列を含むプロンプトでConverseする", async () => {

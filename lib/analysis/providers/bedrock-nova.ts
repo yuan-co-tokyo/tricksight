@@ -25,6 +25,11 @@ import {
   skateAnalysisResultSchema,
   type SkateAnalysisResult,
 } from "../schema";
+import {
+  S3VideoFormatResolver,
+  type BedrockVideoFormat,
+  type VideoFormatResolver,
+} from "../video-container";
 
 export const DEFAULT_BEDROCK_NOVA_MODEL_ID =
   "global.amazon.nova-2-lite-v1:0";
@@ -40,7 +45,6 @@ const MAX_PROVIDER_DURATION_MS = 270_000;
 const SUPPORTED_PROMPT_VERSION: PromptVersionFamily = promptVersionFamily;
 
 type Environment = Readonly<Record<string, string | undefined>>;
-type NovaVideoFormat = "mp4" | "mov";
 type BedrockNovaClient = {
   send(
     command: ConverseCommand,
@@ -157,16 +161,6 @@ function resolveConfig(config: BedrockNovaConfig): ResolvedBedrockNovaConfig {
   return resolved;
 }
 
-function resolveVideoFormat(key: string): NovaVideoFormat {
-  const extension = key.match(/\.([^.]+)$/)?.[1]?.toLowerCase();
-  if (extension === "mp4" || extension === "mov") return extension;
-
-  throw new VideoAnalysisError(
-    "UNSUPPORTED_VIDEO_FORMAT",
-    `Novaで未対応の動画形式です: ${extension ?? "unknown"}`,
-  );
-}
-
 function outputText(response: ConverseCommandOutput) {
   const content = response.output?.message?.content ?? [];
   return content.find(
@@ -261,17 +255,25 @@ export class BedrockNovaVideoAnalyzer implements VideoAnalysisProvider {
   private readonly client: BedrockNovaClient;
   private readonly config: ResolvedBedrockNovaConfig;
   private readonly sleep: (milliseconds: number) => Promise<void>;
+  private readonly videoFormatResolver: VideoFormatResolver;
 
   constructor(
     config: BedrockNovaConfig,
     dependencies: {
       client?: BedrockNovaClient;
       sleep?: (milliseconds: number) => Promise<void>;
+      videoFormatResolver?: VideoFormatResolver;
     } = {},
   ) {
     this.config = resolveConfig(config);
     this.modelId = this.config.modelId;
     this.sleep = dependencies.sleep ?? defaultSleep;
+    this.videoFormatResolver =
+      dependencies.videoFormatResolver ??
+      new S3VideoFormatResolver({
+        awsRegion: this.config.awsRegion,
+        awsAccountId: this.config.awsAccountId,
+      });
     this.client =
       dependencies.client ??
       new BedrockRuntimeClient({
@@ -293,7 +295,7 @@ export class BedrockNovaVideoAnalyzer implements VideoAnalysisProvider {
         `許可されていないS3バケットです: ${bucket}`,
       );
     }
-    const format = resolveVideoFormat(key);
+    const format = await this.videoFormatResolver.resolve(bucket, key);
     const resolvedPrompt = resolveVideoAnalysisPrompt(input);
     const responses: ConverseCommandOutput[] = [];
 
@@ -338,7 +340,7 @@ export class BedrockNovaVideoAnalyzer implements VideoAnalysisProvider {
 
   private async invokeModel(input: {
     videoS3Uri: string;
-    format: NovaVideoFormat;
+    format: BedrockVideoFormat;
     prompt: string;
   }): Promise<ConverseCommandOutput> {
     try {

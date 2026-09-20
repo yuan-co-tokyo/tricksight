@@ -198,6 +198,7 @@ ollie-007 (失敗)  85/80/85/80/85   ← 成功と完全に同一
 | B-1 confidence範囲外 | **修正済み。** confidenceの0〜1尺度を`common-system-v2`に明記し、14本すべてschema通過 |
 | B-2 失敗時のraw_response | **修正済み。** 出力検証失敗時もマスク済み診断envelopeを保存し、クライアントには非公開 |
 | B-3 署名失敗時のゴミ行 | 失敗のたびに PENDING_UPLOAD の行が増える |
+| B-4 MOV拡張子と実コンテナの不一致 | **修正済み。** Bedrock分析時にS3先頭4KiBをRange取得し、`ftyp` major brandからformatを決定 |
 | OIDCロールのBedrock権限 | アプリ側のOIDC対応は完了。実ロールには`bedrock:InvokeModel`が未付与で、本番Nova実行前に追加が必要 |
 | 分析品質 | 17本比較でNovaは12/17正答、失敗10本中8本を検出。残る誤判定5本はプロンプト・撮影条件の改善対象 |
 | スロー撮影の効果 | Novaはスロー3/5、通常9/12で正答し、スロー撮影は主因ではなかった。計画書§7の前提変更は別タスクで扱う |
@@ -449,6 +450,22 @@ AWS公式モデルカードに`jp.amazon.nova-2-lite-v1:0`が存在する。ソ�
 | T10-4 | ソウルバケットのCORS、OIDCロールのS3/Bedrock権限、Vercel Production環境変数を整合 | **依頼者作業** |
 
 既定は`AWS_REGION=ap-northeast-2`、`NOVA_MODEL_ID=global.amazon.nova-2-lite-v1:0`とする。JP推論プロファイルと東京以外の`AWS_REGION`の組み合わせは引き続きコードで拒否する。T10-revertでは実API呼び出しと評価再実行を行わず、leaderが別途`pnpm verify:aws`でソウルGlobal推論の疎通を確認済みである。
+
+## B-4：実ファイルからのBedrock動画format判定
+
+実機の`kickflip_10.mov`は、ブラウザ申告と拡張子がQuickTimeだった一方、実バイトの`ftyp` major brandは`mp42`だった。Novaへ拡張子由来の`format=mov`を渡したため、Bedrockが検出した`video/mp4`と不一致になり400で失敗した。
+
+判定はアップロード完了時のDB保存ではなく、**分析時のS3 Range `GetObject`**を採用する。先頭4KiBだけを1分析につき1回読み、NovaとPegasusの共通処理で`ftyp`を検査する。この方式はDBマイグレーションが不要で、既存アップロードにも即時適用でき、将来オブジェクトが差し替わった場合も分析時点の実データを確認できる。欠点は分析ごとに小さなS3リクエストが1回増えることだが、取得量は4KiB以下である。アップロード時保存方式は取得が1回で済む一方、既存行の補完、マイグレーション、保存後の不整合対策が必要なため採用しない。
+
+- `qt  ` → `mov`
+- `isom` / `mp41` / `mp42` / `avc1` / `iso2` / `M4V `など既知brand → `mp4`
+- `ftyp`なし、未知brand → `UNSUPPORTED_VIDEO_FORMAT`。拡張子や宣言Content-Typeにはフォールバックしない
+- Novaは判定結果をConverseの`video.format`へ渡す
+- Pegasusはformatフィールドを持たないが、同じ実ファイル検証を呼び出し前に通す
+- TwelveLabs直接経路はpresigned URLからAssetを作りformatを指定しないため変更しない
+- Range取得は既存の`s3:GetObject`権限で実行でき、IAMアクション追加は不要
+
+2026-09-20に、障害を再現した既存オブジェクト`kickflip_10.mov`を変更せずに再検証した。先頭バイトから`mp4`を検出し、Nova 2 Lite（`global.amazon.nova-2-lite-v1:0`）を1回だけ呼び出して分析に成功した。結果は`BAILED`、confidence `0.8`（ユーザー申告と一致）で、DB行やS3オブジェクトの作成・更新・削除は行っていない。
 
 ## H：人間（依頼者）側の作業
 
