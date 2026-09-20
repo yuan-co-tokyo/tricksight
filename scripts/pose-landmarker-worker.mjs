@@ -17,7 +17,7 @@ function serializeLandmarks(landmarks) {
   );
 }
 
-async function initialize() {
+async function initialize(config) {
   poseLandmarker?.close();
   poseLandmarker = null;
 
@@ -32,13 +32,13 @@ async function initialize() {
   poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
     baseOptions: {
       modelAssetBuffer,
-      delegate: "CPU",
+      delegate: config.delegate,
     },
     runningMode: "VIDEO",
-    numPoses: 1,
-    minPoseDetectionConfidence: 0.5,
-    minPosePresenceConfidence: 0.5,
-    minTrackingConfidence: 0.5,
+    numPoses: config.numPoses,
+    minPoseDetectionConfidence: config.detectionConfidence,
+    minPosePresenceConfidence: config.presenceConfidence,
+    minTrackingConfidence: config.trackingConfidence,
     outputSegmentationMasks: false,
   });
 
@@ -65,7 +65,7 @@ self.addEventListener("message", async (event) => {
   try {
     let result;
     if (type === "initialize") {
-      result = await initialize();
+      result = await initialize(event.data.config);
     } else if (type === "detect") {
       result = detect(event.data.bitmap, event.data.timestampMs);
     } else if (type === "close") {

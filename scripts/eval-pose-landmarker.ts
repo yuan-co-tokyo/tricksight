@@ -12,6 +12,7 @@ import { createServer, type ServerResponse } from "node:http";
 import { basename, extname, resolve } from "node:path";
 import { z } from "zod";
 
+import { POSE_LANDMARKER_CONFIG } from "../lib/pose/config";
 import {
   assessPoseQuality,
   calculatePoseMetrics,
@@ -24,15 +25,10 @@ import {
   type PoseRun,
 } from "./pose-landmarker-metrics";
 
-const MODEL_URL =
-  "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task";
-const EXPECTED_MODEL_SHA256 =
-  "5134a3aad27a58b93da0088d431f366da362b44e3ccfbe3462b3827a839011b1";
 const MODEL_CACHE_PATH = resolve(
-  "eval/mediapipe-cache/pose_landmarker_full-float16-v1.task",
+  `eval/mediapipe-cache/${POSE_LANDMARKER_CONFIG.model.name}.task`,
 );
 const OUTPUT_DIRECTORY = resolve("eval/output");
-const DEFAULT_FIXED_FPS = 10;
 const browserNameSchema = z.enum(["chromium", "webkit"]);
 const PILOT_SAMPLE_IDS = [
   "ollie-001",
@@ -59,6 +55,13 @@ type BrowserRunInput = {
   videoUrl: string;
   mode: "fixed" | "all-frames";
   fixedFps: number;
+  landmarkerConfig: {
+    delegate: "CPU";
+    numPoses: number;
+    detectionConfidence: number;
+    presenceConfidence: number;
+    trackingConfidence: number;
+  };
 };
 
 type Arguments = {
@@ -102,7 +105,7 @@ function parseArguments(): Arguments {
   const fixedFpsValue = argumentValue("--fixed-fps");
   const fixedFps = fixedFpsValue
     ? z.coerce.number().int().min(1).max(60).parse(fixedFpsValue)
-    : DEFAULT_FIXED_FPS;
+    : POSE_LANDMARKER_CONFIG.sampleRateFps;
   const browserName = browserNameSchema.parse(
     argumentValue("--browser") ?? "chromium",
   );
@@ -144,8 +147,10 @@ async function ensureModel() {
     await access(MODEL_CACHE_PATH);
   } catch {
     await mkdir(resolve("eval/mediapipe-cache"), { recursive: true });
-    console.log(`Downloading pinned Pose Landmarker model: ${MODEL_URL}`);
-    const response = await fetch(MODEL_URL);
+    console.log(
+      `Downloading pinned Pose Landmarker model: ${POSE_LANDMARKER_CONFIG.model.url}`,
+    );
+    const response = await fetch(POSE_LANDMARKER_CONFIG.model.url);
     if (!response.ok) {
       throw new Error(`Model download failed: ${response.status} ${response.statusText}`);
     }
@@ -158,9 +163,9 @@ async function ensureModel() {
 
   const bytes = await readFile(MODEL_CACHE_PATH);
   const sha256 = createHash("sha256").update(bytes).digest("hex");
-  if (sha256 !== EXPECTED_MODEL_SHA256) {
+  if (sha256 !== POSE_LANDMARKER_CONFIG.model.sha256) {
     throw new Error(
-      `Pose Landmarker model hash mismatch: expected ${EXPECTED_MODEL_SHA256}, received ${sha256}. Remove ${MODEL_CACHE_PATH} and retry.`,
+      `Pose Landmarker model hash mismatch: expected ${POSE_LANDMARKER_CONFIG.model.sha256}, received ${sha256}. Remove ${MODEL_CACHE_PATH} and retry.`,
     );
   }
   return {
@@ -380,6 +385,14 @@ async function main() {
   page.on("pageerror", (error) => console.error(`[browser:error] ${error.message}`));
 
   const evaluatedSamples: EvaluatedSample[] = [];
+  const thresholds = POSE_LANDMARKER_CONFIG.confidenceThresholds;
+  const landmarkerConfig: BrowserRunInput["landmarkerConfig"] = {
+    delegate: POSE_LANDMARKER_CONFIG.delegate,
+    numPoses: POSE_LANDMARKER_CONFIG.numPoses,
+    detectionConfidence: thresholds.detection,
+    presenceConfidence: thresholds.presence,
+    trackingConfidence: thresholds.tracking,
+  };
   try {
     await page.goto(server.origin, { waitUntil: "networkidle" });
     for (const [index, sample] of samples.entries()) {
@@ -391,6 +404,7 @@ async function main() {
         videoUrl,
         mode: "fixed",
         fixedFps: arguments_.fixedFps,
+        landmarkerConfig,
       });
       console.log(
         `[${index + 1}/${samples.length}] ${sample.id}: fixed ${arguments_.fixedFps}fps run 2`,
@@ -399,12 +413,14 @@ async function main() {
         videoUrl,
         mode: "fixed",
         fixedFps: arguments_.fixedFps,
+        landmarkerConfig,
       });
       const allFrames = arguments_.includeAllFrames
         ? await runInBrowser(page, {
             videoUrl,
             mode: "all-frames",
             fixedFps: arguments_.fixedFps,
+            landmarkerConfig,
           })
         : null;
       if (arguments_.includeAllFrames) {
@@ -523,8 +539,8 @@ async function main() {
       playwrightVersion: playwrightPackage.version,
       mediapipeTasksVisionVersion: mediapipePackage.version,
       model: {
-        name: "pose_landmarker_full-float16-v1",
-        url: MODEL_URL,
+        name: POSE_LANDMARKER_CONFIG.model.name,
+        url: POSE_LANDMARKER_CONFIG.model.url,
         bytes: model.bytes,
         sha256: model.sha256,
       },

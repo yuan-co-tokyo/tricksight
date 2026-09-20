@@ -106,6 +106,14 @@ pnpm eval:pose -- --browser webkit --sample ollie-001
 
 固定10fpsでpose検出率と下半身検出率がともに80%以上の動画だけを判定可能層とする。この閾値は全17本の群差を見る前に固定した。詳細な設計、実測値、限界は[Pose Landmarker実現可能性レポート](../docs/phase0-pose-landmarker-feasibility.md)を参照する。
 
+指標計算と固定条件は製品Workerと共通の`lib/pose/`に置く。`scripts/pose-landmarker-metrics.ts`は既存の評価importを維持するre-exportだけであり、計算ロジックを二重管理しない。製品Workerは生33点を外へ返さず、品質情報と4つの集約値だけを返す。
+
+製品Workerのブラウザintegration testは、元MOVと同じバイト列の`eval/input/kickflip_10.mp4`をMP4 / MOVの両Content-Typeで配信し、ChromiumとWebKitの4組み合わせを確認する。入力動画と検証済みモデルキャッシュはGit管理外なので、上記の評価準備後に実行する。
+
+```bash
+pnpm test:pose-integration
+```
+
 ## 評価時の確認項目
 
 - トリックと成功・失敗を正しく認識できているか

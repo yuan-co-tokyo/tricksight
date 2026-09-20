@@ -172,10 +172,17 @@ async function runAllFrames(video, client) {
   return { frames, presentedFrameGaps };
 }
 
-window.runPoseLandmarker = async ({ videoUrl, mode, fixedFps }) => {
+window.runPoseLandmarker = async ({
+  videoUrl,
+  mode,
+  fixedFps,
+  landmarkerConfig,
+}) => {
   const video = await createVideo(videoUrl);
   const client = new PoseWorkerClient();
-  const initialized = await client.call("initialize");
+  const initialized = await client.call("initialize", {
+    config: landmarkerConfig,
+  });
   const startedAt = performance.now();
 
   try {
