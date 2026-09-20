@@ -34,6 +34,7 @@ MVPでは、以下を検証する。
 - 練習日、撮影方向、メモの登録
 - 成功・失敗の自己申告
 - Amazon Bedrockによる動画分析
+- MediaPipe Pose Landmarkerによる骨格座標の抽出（具体的な数値指標とUIはT11-1の実現可能性検証後に確定）
 - 分析中、完了、失敗のステータス表示
 - AI分析結果の表示
 - トリック別の履歴一覧
@@ -42,8 +43,7 @@ MVPでは、以下を検証する。
 
 ### MVPでは実装しない機能
 
-- MediaPipeによる骨格解析
-- 膝や関節角度の数値測定
+- 網羅的な全関節角度の測定や、医学的・バイオメカニクス的な精度をうたう評価
 - スケートボード自体の物体検出
 - 動画同士の比較再生
 - リアルタイム撮影アドバイス
@@ -51,6 +51,16 @@ MVPでは、以下を検証する。
 - AIチャット
 - ネイティブスマートフォンアプリ
 - 課金機能
+
+MediaPipeによる骨格解析は当初MVP対象外としていた。しかし、同じ17本を同じモデル・プロンプト・`temperature: 0`で再評価した際に5/17（約3割）のoutcomeが入れ替わり、計画書§18の確認項目5「同じ動画に対して評価が大きくぶれないか」が未達となった。LLM単体では§19の「前回との違い」からモデルの揺らぎを分離できないため、固定した入力・モデル・抽出条件から再現性の高い数値を得る手段として、2026-09-20に意図的にMVP範囲へ加えた。
+
+ただし「同じ動画なら常に完全に同じ値になる」ことは、ブラウザ、デコーダ、CPU/GPU delegate、ライブラリとモデルの版、サンプリング時刻が異なる環境まで自動的に保証されるわけではない。MVPではこれらを固定し、許容差を含む反復検証をT11-1で行ったうえで、LLMより再現性の高い比較指標として成立することを確認する。
+
+関連機能の扱いは次を**未決提案**とし、T11-1の結果と依頼者の承認なしに範囲を広げない。
+
+- 膝・関節角度：33点の骨格座標だけでは利用者価値が見えにくいため、左右の膝屈曲、体幹傾斜、腰の上下動など少数の集約指標を候補とする。全関節の網羅的測定、絶対的な跳躍高、医学的評価は対象外のままとする
+- スケートボード物体検出：対象外のままとする。Pose Landmarkerは人体の骨格モデルであり、板の回転・接地・足との位置関係には別モデルと教師データが必要になる
+- 動画同士の比較再生：対象外のままとする。まず数値指標の履歴比較で中心価値を検証し、2本の同期再生UIは別の価値検証後に判断する
 
 ## 4. 対象トリック
 
@@ -92,6 +102,27 @@ AIによる自動判定ではなく、ユーザーが事前にトリックを選
 - Phase 0の棚卸しと17本比較を経てNovaを既定に確定した
 
 Pegasusは同期`InvokeModel`で呼び出せ、`responseFormat.jsonSchema`による構造化出力をネイティブに備える。第9章の`SkateAnalysisResult`をスキーマとして直接渡せるため、Novaのプロンプト依存のJSON生成より扱いやすい。
+
+### 骨格解析（T11、実現可能性検証前の暫定方針）
+
+第一候補はブラウザ上の`@mediapipe/tasks-vision` Pose Landmarkerとする。Google公式のWebガイドでは、画像と動画のデコード済みフレームを入力にでき、`detectForVideo()`が各フレームについて33点の正規化座標と3次元world座標を返す。入力動画をGoogleの推論サーバーへ送らずアップロード前に端末内で処理できるため、既存のVercel + S3直接アップロード構成を維持し、サーバー負荷と新しい動画処理基盤を増やさない。
+
+ただし、公式ガイドは`detect()` / `detectForVideo()`が同期実行でUIスレッドをブロックすると明記しているため、製品組み込み時はWeb Workerを前提とする。公式サンプルもPose LandmarkerをWorker内で実行し、CPU/GPU delegateごとの推論時間を計測する構成である。Webの既定delegateはCPUなので、T11-1では再現性を優先してCPUを基準にし、処理時間が成立しない場合だけGPUを比較する。
+
+ブラウザで「動画の全ソースフレーム」を処理できるAPIはあるが、最大20秒の動画を端末横断で実用時間内に処理できるという公式保証はない。処理時間はデコード可能な形式、解像度、フレーム数、端末、ブラウザ、delegateに依存する。全フレーム処理と、動画の時刻から決定的に選ぶ固定レート（例：10または15fps）処理をT11-1で比較し、後者でも必要な動作を捉えられるなら、負荷上限と再現性を揃えやすい固定レートを採用候補とする。UIは進捗、キャンセル、タイムアウトを持ち、骨格解析だけ失敗しても動画アップロードとLLM分析を続行できる縮退動作を候補とする。
+
+公式の対応表とセットアップガイドはPose Landmarkerの実行先をWeb（Chrome / Safari）とPythonとして示し、Node.jsとnpmはWebアプリの開発環境として扱っている。ブラウザ用APIの入力も`HTMLVideoElement` / `ImageBitmap`などのWeb画像型であり、**純粋なNode.jsプロセスを本番・評価の実行先とする公式対応は確認できない**。そこでT11-1の評価スクリプトはNode.jsからPlaywrightのheadless Chromiumを起動し、そのブラウザ内で本番と同じ`@mediapipe/tasks-vision`、model、WASM、Worker処理を動かす方式を提案する。Google公式WebサンプルもE2EテストにPlaywrightを使用している。iPhone Safari相当の確認はWebKitと実機で補い、特に現在許可しているMP4/MOVをブラウザがデコードできるかを検証する。
+
+Python + MediaPipeをLambda等で動かすサーバー方式は、端末差を中央で吸収できる一方、新しい実行基盤、動画転送、非同期ジョブ、監視、費用が必要で、§5の「MVPではLambdaを使わない」と衝突する。そのため現時点では採用せず、T11-1でブラウザ方式が時間・対応形式・再現性の合格条件を満たさなかった場合に限り、MVPのインフラ範囲を再承認する判断点とする。
+
+一次情報：
+
+- [Google: Pose landmark detection guide for Web](https://developers.google.com/edge/mediapipe/solutions/vision/pose_landmarker/web_js)
+- [Google: Setup guide for web](https://developers.google.com/edge/mediapipe/solutions/setup_web)
+- [Google: Pose Landmarker overview and 33 landmarks](https://developers.google.com/edge/mediapipe/solutions/vision/pose_landmarker)
+- [Google公式MediaPipe Tasks Vision README（端末内処理とprivacy notice）](https://github.com/google-ai-edge/mediapipe/blob/master/mediapipe/tasks/web/vision/README.md)
+- [Google公式Webサンプル（Playwrightテスト）](https://github.com/google-ai-edge/mediapipe-samples-web)
+- [Google公式Pose Landmarker Worker実装](https://github.com/google-ai-edge/mediapipe-samples-web/blob/main/src/workers/pose-landmarker.worker.ts)
 
 ### バックエンド処理
 
@@ -464,9 +495,10 @@ NovaのモデルIDは環境変数`NOVA_MODEL_ID`で変更できる。現在の�
 VideoAnalysisProvider
 ├─ BedrockNovaVideoAnalyzer
 ├─ BedrockPegasusVideoAnalyzer
-├─ GeminiVideoAnalyzer
-└─ MediaPipeEnhancedAnalyzer
+└─ GeminiVideoAnalyzer
 ```
+
+MediaPipeはLLM動画プロバイダーの差し替えではなく、LLM結果とは独立した再現性の高い時系列指標を補う処理としてMVPへ追加する。ブラウザ処理、保存形式、LLMへ骨格情報を渡すかどうかの境界はT11-1後に決めるため、現時点では`VideoAnalysisProvider`実装へ含めない。
 
 モデルの選択機能は、MVPではユーザーに公開しない。
 
@@ -814,6 +846,7 @@ Phase 0はPhase 1〜3と並行できるが、Phase 5の実装はPhase 0の品質
 - AI分析が非同期で実行される
 - 分析中、完了、失敗を確認できる
 - AI結果が構造化JSONで保存される
+- T11-1の品質ゲートを通過した骨格指標が、固定条件で再現可能な形で保存・表示される
 - 総評、良かった点、改善点、次回練習を表示できる
 - トリック別に履歴を確認できる
 - 過去動画を再生できる
@@ -849,7 +882,7 @@ Phase 0はPhase 1〜3と並行できるが、Phase 5の実装はPhase 0の品質
 5. トリック別プロンプトを細分化する
 6. 動画から代表フレームを抽出する
 7. Geminiと比較検証する
-8. MediaPipeによる骨格情報を追加する
+8. MediaPipeによる骨格情報を追加する（17本再評価の再現性問題を受け、T11としてMVP範囲へ変更。まず実現可能性を検証する）
 
 ## 19. MVPで最も重視すること
 
@@ -861,4 +894,4 @@ tricksightのMVPで最優先すべきなのは、高度な動画解析技術で�
 
 と思える分析結果と履歴体験を作ることである。
 
-まずBedrock単体で価値を検証し、骨格解析、動画比較、板の検出などは、MVP後に段階的に追加する。
+優先順位の思想は変えない。まずBedrock単体と履歴体験を実装して価値を検証した結果、同一17本の再評価でoutcomeが約3割入れ替わり、LLM単体では「前回との違い」とモデルの揺らぎを分離できないことが分かった。この実測を受け、骨格解析だけは決定的な数値比較を補う手段としてMVPへ前倒しする。ただし直ちに製品実装せず、Phase 0と同じくT11-1で成立性を確認してから作る。動画比較再生と板の検出は引き続きMVP後に段階的に追加する。
