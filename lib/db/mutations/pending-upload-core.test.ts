@@ -22,6 +22,7 @@ const validInput = {
   trickId: ids.trick,
   practicedAt: "2026-08-15T12:00:00.000Z",
   cameraAngle: "SIDE",
+  videoSpeed: "SLOW_MOTION",
   userOutcome: "LANDED",
   memo: "着地を安定させる練習",
   video: {
@@ -131,6 +132,15 @@ describe("createPendingUploadCreator", () => {
     expect(events).toEqual([]);
   });
 
+  it("requires a structured NORMAL or SLOW_MOTION video speed", async () => {
+    const { creator, events } = setup();
+
+    await expect(
+      creator({ ...validInput, videoSpeed: "HIGH_FPS" }),
+    ).rejects.toBeInstanceOf(z.ZodError);
+    expect(events).toEqual([]);
+  });
+
   it("builds an MP4 key from server-owned IDs without using the original filename", async () => {
     const { creator, committedSessions, committedVideos, events } = setup();
 
@@ -150,6 +160,7 @@ describe("createPendingUploadCreator", () => {
         id: ids.session,
         userId: "user-from-session",
         trickId: ids.trick,
+        videoSpeed: "SLOW_MOTION",
       }),
     ]);
     expect(committedVideos).toEqual([

@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   cameraAngleEnum,
   userOutcomeEnum,
+  videoSpeedEnum,
   type practiceSessions,
   type videos,
 } from "../schema";
@@ -20,6 +21,7 @@ export {
 
 export type CameraAngle = (typeof cameraAngleEnum.enumValues)[number];
 export type UserOutcome = (typeof userOutcomeEnum.enumValues)[number];
+export type VideoSpeed = (typeof videoSpeedEnum.enumValues)[number];
 
 type PracticeSessionInsert = typeof practiceSessions.$inferInsert;
 type VideoInsert = typeof videos.$inferInsert;
@@ -31,6 +33,7 @@ export type PendingUploadSessionInsert = Pick<
   | "trickId"
   | "practicedAt"
   | "cameraAngle"
+  | "videoSpeed"
   | "userOutcome"
   | "memo"
 >;
@@ -86,6 +89,7 @@ export function createPendingUploadInputSchema(now: Date) {
       message: "practicedAt must not be in the future.",
     }),
     cameraAngle: z.enum(cameraAngleEnum.enumValues),
+    videoSpeed: z.enum(videoSpeedEnum.enumValues),
     userOutcome: z.enum(userOutcomeEnum.enumValues),
     memo: z
       .string()
@@ -171,6 +175,7 @@ export function createPendingUploadCreator(
         trickId: trick.id,
         practicedAt: parsedInput.practicedAt,
         cameraAngle: parsedInput.cameraAngle,
+        videoSpeed: parsedInput.videoSpeed,
         userOutcome: parsedInput.userOutcome,
         memo: parsedInput.memo,
       });

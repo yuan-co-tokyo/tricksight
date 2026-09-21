@@ -5,6 +5,7 @@ export type ApplicationLogEvent =
   | "analysis.request.failed"
   | "analysis.status.failed"
   | "analysis.stuck_detected"
+  | "pose.measurement.save_failed"
   | "session.deletion.failed"
   | "upload.completion.failed"
   | "upload.presigned_post.failed"

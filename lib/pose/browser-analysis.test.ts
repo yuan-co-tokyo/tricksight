@@ -135,6 +135,40 @@ describe("startPoseVideoAnalysis core", () => {
     expect(source.close).toHaveBeenCalledOnce();
   });
 
+  it("進捗通知を5フレームまたは100ms単位に間引く", async () => {
+    const source = frameSource({ durationMs: 1_250 });
+    const byFrameInterval = vi.fn();
+    await poseAnalysisTesting.startWithDependencies(
+      new Blob(),
+      { onProgress: byFrameInterval },
+      dependencies(source),
+    ).result;
+
+    expect(
+      byFrameInterval.mock.calls
+        .map(([progress]) => progress)
+        .filter((progress) => progress.phase === "PROCESSING")
+        .map((progress) => progress.processedFrames),
+    ).toEqual([5, 10, 12]);
+
+    let now = 0;
+    const byElapsedTime = vi.fn();
+    const deps = dependencies(frameSource({ durationMs: 650 }));
+    deps.now = () => (now += 40);
+    await poseAnalysisTesting.startWithDependencies(
+      new Blob(),
+      { onProgress: byElapsedTime },
+      deps,
+    ).result;
+
+    expect(
+      byElapsedTime.mock.calls
+        .map(([progress]) => progress)
+        .filter((progress) => progress.phase === "PROCESSING")
+        .map((progress) => progress.processedFrames),
+    ).toEqual([3, 5, 6]);
+  });
+
   it("cancelするとWorkerを止めてCANCELEDを返す", async () => {
     const source = frameSource({
       frameAt: (_timestamp, signal) =>
@@ -196,5 +230,26 @@ describe("startPoseVideoAnalysis core", () => {
       errorCode: "NOTSUPPORTEDERROR",
       metrics: null,
     });
+  });
+
+  it("Worker転送失敗時もImageBitmapとframe sourceを解放する", async () => {
+    const image = bitmap();
+    const source = frameSource({ frameAt: vi.fn(async () => image) });
+    const worker = new FakeWorker();
+    worker.postMessage = vi.fn((message: PoseWorkerRequest) => {
+      if (message.type === "detect") throw new Error("transfer failed");
+      FakeWorker.prototype.postMessage.call(worker, message);
+    });
+
+    const result = await poseAnalysisTesting.startWithDependencies(
+      new Blob(),
+      {},
+      dependencies(source, worker),
+    ).result;
+
+    expect(result).toMatchObject({ status: "FAILED" });
+    expect(image.close).toHaveBeenCalledOnce();
+    expect(source.close).toHaveBeenCalledOnce();
+    expect(worker.terminated).toBe(true);
   });
 });

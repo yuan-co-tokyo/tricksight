@@ -20,6 +20,7 @@ const validInput = {
   trickId: "00000000-0000-4000-8000-000000000003",
   practicedAt: "2026-08-16T12:00:00.000Z",
   cameraAngle: "SIDE",
+  videoSpeed: "SLOW_MOTION",
   userOutcome: "LANDED",
   memo: "着地を安定させる練習",
   video: {

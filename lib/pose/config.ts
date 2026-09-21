@@ -25,6 +25,9 @@ export const POSE_LANDMARKER_CONFIG = {
     poseCoverage: 0.8,
     lowerBodyCoverage: 0.8,
   },
+  // T11-1 measured about 3.5s/video on macOS Chromium. Until T11-7 measures
+  // 20s clips on real phones, allow 120s (over 30x that average) so slower
+  // devices can finish while retaining an absolute resource-cleanup bound.
   defaultTimeoutMs: 120_000,
   progress: {
     frameInterval: 5,

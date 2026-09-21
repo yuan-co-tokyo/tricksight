@@ -85,4 +85,5 @@ export {
   type CreatePendingUploadInput,
   type CreatePendingUploadResult,
   type UserOutcome,
+  type VideoSpeed,
 } from "./pending-upload-core";

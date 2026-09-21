@@ -23,6 +23,7 @@ describe("POSE_LANDMARKER_CONFIG", () => {
         poseCoverage: 0.8,
         lowerBodyCoverage: 0.8,
       },
+      defaultTimeoutMs: 120_000,
       model: {
         name: "pose_landmarker_full-float16-v1",
         sha256:

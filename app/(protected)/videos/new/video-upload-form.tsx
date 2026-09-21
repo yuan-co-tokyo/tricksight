@@ -8,15 +8,19 @@ import {
   type SyntheticEvent,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
+  ArrowRightIcon,
   CheckCircle2Icon,
   FileVideoIcon,
   InfoIcon,
+  ScanLineIcon,
   TriangleAlertIcon,
   UploadCloudIcon,
   UserRoundCogIcon,
+  XIcon,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +46,11 @@ import {
   type AnalysisRequestErrorDetail,
 } from "@/lib/analysis/analysis-client";
 import {
+  detectPoseRuntimeFamily,
+  savePoseMeasurementResult,
+} from "@/lib/pose/pose-measurement-client";
+import type { PoseMeasurementResult } from "@/lib/pose/types";
+import {
   DirectUploadError,
   uploadVideoDirectlyToS3,
 } from "@/lib/uploads/browser-direct-upload";
@@ -49,6 +58,11 @@ import {
   validateVideoDuration,
   validateVideoFileBasics,
 } from "@/lib/uploads/client-video-validation";
+import {
+  createPoseSelectionCoordinator,
+  startIndependentPostUploadTasks,
+  type PoseSelectionHandle,
+} from "@/lib/uploads/pose-upload-coordinator";
 import type { AllowedVideoContentType } from "@/lib/uploads/video-constraints";
 import { SLOW_MOTION_VIDEO_GUIDANCE } from "@/lib/uploads/slow-motion-guidance";
 import { cn } from "@/lib/utils";
@@ -75,6 +89,25 @@ type UploadStatus =
   | "success"
   | "analysis-error"
   | "error";
+
+type PoseUiStatus =
+  | "idle"
+  | "initializing"
+  | "processing"
+  | "finalizing"
+  | "completed"
+  | "unassessable"
+  | "failed"
+  | "timed-out"
+  | "canceled"
+  | "saving"
+  | "saved"
+  | "save-error";
+
+type PoseUiState = {
+  status: PoseUiStatus;
+  progress: number;
+};
 
 type PresignedUploadResponse = {
   url: string;
@@ -117,6 +150,51 @@ const fallbackAnalysisStartError: AnalysisRequestErrorDetail = {
     "現在、分析を利用できません。時間をおいてからもう一度お試しください。",
   action: "TRY_LATER",
 };
+
+const initialPoseState: PoseUiState = { status: "idle", progress: 0 };
+
+function poseTerminalState(result: PoseMeasurementResult): PoseUiState {
+  const statusByResult = {
+    COMPLETED: "completed",
+    UNASSESSABLE: "unassessable",
+    FAILED: "failed",
+    TIMED_OUT: "timed-out",
+    CANCELED: "canceled",
+  } as const;
+
+  return {
+    status: statusByResult[result.status],
+    progress: result.status === "CANCELED" ? 0 : 100,
+  };
+}
+
+function poseStatusMessage(status: PoseUiStatus) {
+  switch (status) {
+    case "initializing":
+      return "フォーム計測を準備しています";
+    case "processing":
+      return "フォームを計測しています";
+    case "finalizing":
+      return "フォーム計測をまとめています";
+    case "completed":
+      return "フォーム計測が完了しました";
+    case "saving":
+      return "フォーム計測を保存しています";
+    case "saved":
+      return "フォーム計測を保存しました";
+    case "unassessable":
+      return "フォームを十分に計測できませんでした。動画アップロードとAI分析は続行できます。";
+    case "failed":
+    case "timed-out":
+      return "フォーム計測を完了できませんでした。動画アップロードとAI分析は続行できます。";
+    case "canceled":
+      return "フォーム計測を中止しました。動画アップロードとAI分析には影響しません。";
+    case "save-error":
+      return "フォーム計測を保存できませんでしたが、AI分析は進んでいます。";
+    default:
+      return "";
+  }
+}
 
 function isPresignedUploadResponse(
   value: unknown,
@@ -274,12 +352,15 @@ export function VideoUploadForm({
   const [videoError, setVideoError] = useState<string | null>(null);
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>("idle");
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [poseState, setPoseState] = useState<PoseUiState>(initialPoseState);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [analysisError, setAnalysisError] =
     useState<AnalysisRequestErrorDetail | null>(null);
   const [uploadedSessionId, setUploadedSessionId] = useState<string | null>(
     null,
   );
+  const [poseCoordinator] = useState(() => createPoseSelectionCoordinator());
+  const poseSelectionRef = useRef<PoseSelectionHandle | null>(null);
   const selectedTrick = useMemo(
     () => tricks.find((trick) => trick.id === trickId) ?? null,
     [trickId, tricks],
@@ -300,6 +381,10 @@ export function VideoUploadForm({
     trickId !== "" &&
     !isBusy &&
     !hasCompletedUpload;
+  const isPoseActive =
+    poseState.status === "initializing" ||
+    poseState.status === "processing" ||
+    poseState.status === "finalizing";
 
   useEffect(() => {
     const previewUrl = selectedVideo?.previewUrl;
@@ -308,6 +393,10 @@ export function VideoUploadForm({
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [selectedVideo?.previewUrl]);
+
+  useEffect(() => {
+    return () => poseCoordinator.dispose();
+  }, [poseCoordinator]);
 
   function resetSubmissionState() {
     setUploadStatus("idle");
@@ -320,6 +409,9 @@ export function VideoUploadForm({
   function handleVideoChange(event: ChangeEvent<HTMLInputElement>) {
     resetSubmissionState();
     setVideoError(null);
+    poseCoordinator.clear();
+    poseSelectionRef.current = null;
+    setPoseState(initialPoseState);
 
     const files = event.currentTarget.files;
     if (!files || files.length === 0) {
@@ -350,6 +442,23 @@ export function VideoUploadForm({
       previewUrl: URL.createObjectURL(file),
       durationSeconds: null,
     });
+    setPoseState({ status: "initializing", progress: 0 });
+    poseSelectionRef.current = poseCoordinator.select(file, {
+      onProgress(progress) {
+        setPoseState({
+          status:
+            progress.phase === "INITIALIZING"
+              ? "initializing"
+              : progress.phase === "PROCESSING"
+                ? "processing"
+                : "finalizing",
+          progress: Math.round(progress.percent * 100),
+        });
+      },
+      onTerminal(result) {
+        setPoseState(poseTerminalState(result));
+      },
+    });
   }
 
   function handleMetadataLoaded(event: SyntheticEvent<HTMLVideoElement>) {
@@ -360,12 +469,26 @@ export function VideoUploadForm({
       current ? { ...current, durationSeconds } : current,
     );
     setVideoError(validation.success ? null : validation.message);
+    if (!validation.success) poseSelectionRef.current?.cancel();
   }
 
   function handleMetadataError() {
+    poseSelectionRef.current?.cancel();
     setVideoError(
       "動画の再生時間を取得できませんでした。別のMP4またはMOVを選んでください。",
     );
+  }
+
+  function handlePoseCancel() {
+    poseSelectionRef.current?.cancel();
+  }
+
+  function handleNavigateToResult() {
+    if (!uploadedSessionId) return;
+    // Navigation never controls the upload or LLM request. It only ends the
+    // optional local pose task; the keepalive save records CANCELED if needed.
+    poseSelectionRef.current?.cancel();
+    router.push(`/history/${encodeURIComponent(uploadedSessionId)}`);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -378,6 +501,7 @@ export function VideoUploadForm({
       trickId,
       practicedAt: `${practicedAt}T00:00:00+09:00`,
       cameraAngle: String(formData.get("cameraAngle") ?? ""),
+      videoSpeed: String(formData.get("videoSpeed") ?? ""),
       userOutcome: String(formData.get("userOutcome") ?? ""),
       memo: String(formData.get("memo") ?? ""),
       video: {
@@ -415,12 +539,40 @@ export function VideoUploadForm({
       setUploadStatus("starting-analysis");
 
       try {
-        await requestAnalysisStart(presignedUpload.videoId);
+        const poseResult = poseSelectionRef.current?.result;
+        const tasks = poseResult
+          ? startIndependentPostUploadTasks({
+              videoId: presignedUpload.videoId,
+              runtimeFamily: detectPoseRuntimeFamily(),
+              poseResult: poseResult.then((result) => {
+                setPoseState((current) => ({
+                  status: "saving",
+                  progress: Math.max(current.progress, 100),
+                }));
+                return result;
+              }),
+              startAnalysis: requestAnalysisStart,
+              savePoseMeasurement: savePoseMeasurementResult,
+            })
+          : {
+              analysisStart: requestAnalysisStart(presignedUpload.videoId),
+              posePersistence: null,
+            };
+
+        if (tasks.posePersistence) {
+          void tasks.posePersistence.then((outcome) => {
+            setPoseState({
+              status: outcome.status === "SAVED" ? "saved" : "save-error",
+              progress: 100,
+            });
+          });
+        }
+
+        await tasks.analysisStart;
         setUploadStatus("success");
         setFeedback(
-          "アップロードが完了し、AI分析を開始しました。分析中の画面へ移動します。",
+          "アップロードが完了し、AI分析を開始しました。フォーム計測を待たずに結果画面へ進めます。",
         );
-        router.push(`/history/${encodeURIComponent(presignedUpload.sessionId)}`);
       } catch (error) {
         const detail = analysisStartErrorDetail(error);
         setAnalysisError(detail);
@@ -476,7 +628,10 @@ export function VideoUploadForm({
             onSubmit={handleSubmit}
             aria-busy={isBusy}
           >
-            <fieldset className="grid gap-5" disabled={isBusy || hasCompletedUpload}>
+            <fieldset
+              className="grid gap-5"
+              disabled={isBusy || hasCompletedUpload}
+            >
               <legend className="mb-4 text-base font-semibold">練習情報</legend>
 
               <div className="grid gap-2">
@@ -539,6 +694,26 @@ export function VideoUploadForm({
                     <option value="UNCLEAR">不明（UNCLEAR）</option>
                   </select>
                 </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="videoSpeed">動画の再生速度</Label>
+                  <select
+                    id="videoSpeed"
+                    name="videoSpeed"
+                    defaultValue=""
+                    className={fieldClassName}
+                    required
+                  >
+                    <option value="" disabled>
+                      選択してください
+                    </option>
+                    <option value="NORMAL">通常速度</option>
+                    <option value="SLOW_MOTION">スローモーション</option>
+                  </select>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    履歴では同じ再生速度の動画だけを比較します。
+                  </p>
+                </div>
               </div>
 
               <div className="grid gap-5 sm:grid-cols-2">
@@ -568,7 +743,7 @@ export function VideoUploadForm({
               </div>
             </fieldset>
 
-            <fieldset className="grid min-w-0 gap-4" disabled={isBusy || hasCompletedUpload}>
+            <fieldset className="grid min-w-0 gap-4">
               <legend className="mb-4 text-base font-semibold">動画</legend>
               <div className="grid gap-2">
                 <Label htmlFor="video">動画ファイル</Label>
@@ -581,6 +756,7 @@ export function VideoUploadForm({
                   aria-describedby="video-requirements"
                   aria-invalid={Boolean(videoError)}
                   className="h-auto min-h-11 py-2"
+                  disabled={isBusy || hasCompletedUpload}
                   required
                 />
                 <p
@@ -636,6 +812,50 @@ export function VideoUploadForm({
                       </Badge>
                     </div>
                   </div>
+                </div>
+              ) : null}
+
+              {selectedVideo && poseState.status !== "idle" ? (
+                <div className="grid gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3 sm:p-4">
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-start gap-2">
+                      <ScanLineIcon
+                        aria-hidden="true"
+                        className="mt-0.5 size-4 shrink-0 text-primary"
+                      />
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">フォーム計測</p>
+                        <p
+                          className="text-xs leading-5 text-muted-foreground"
+                          role="status"
+                          aria-live="polite"
+                        >
+                          {poseStatusMessage(poseState.status)}
+                        </p>
+                      </div>
+                    </div>
+                    {isPoseActive ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handlePoseCancel}
+                        className="shrink-0"
+                      >
+                        <XIcon aria-hidden="true" />
+                        中止
+                      </Button>
+                    ) : null}
+                  </div>
+                  <Progress
+                    value={poseState.progress}
+                    aria-label="フォーム計測進捗"
+                  >
+                    <ProgressLabel>フォーム計測</ProgressLabel>
+                    <span className="ml-auto text-sm tabular-nums text-muted-foreground">
+                      {poseState.progress}%
+                    </span>
+                  </Progress>
                 </div>
               ) : null}
             </fieldset>
@@ -694,9 +914,10 @@ export function VideoUploadForm({
               </p>
             ) : null}
 
-            {analysisError && uploadedSessionId ? (
+            {uploadedSessionId &&
+            (analysisError || uploadStatus === "success") ? (
               <div className="grid gap-2 sm:grid-cols-2">
-                {analysisError.action === "SET_STANCE" ? (
+                {analysisError?.action === "SET_STANCE" ? (
                   <Link
                     href="/profile"
                     className={cn(
@@ -708,16 +929,21 @@ export function VideoUploadForm({
                     プロフィールでスタンスを設定
                   </Link>
                 ) : null}
-                <Link
-                  href={`/history/${encodeURIComponent(uploadedSessionId)}`}
+                <Button
+                  type="button"
+                  variant={uploadStatus === "success" ? "default" : "outline"}
+                  size="lg"
+                  onClick={handleNavigateToResult}
                   className={cn(
-                    buttonVariants({ variant: "outline", size: "lg" }),
                     "h-11 w-full",
-                    analysisError.action !== "SET_STANCE" && "sm:col-span-2",
+                    analysisError?.action !== "SET_STANCE" && "sm:col-span-2",
                   )}
                 >
-                  アップロード済み動画を確認
-                </Link>
+                  {uploadStatus === "success"
+                    ? "結果画面へ進む"
+                    : "アップロード済み動画を確認"}
+                  <ArrowRightIcon aria-hidden="true" />
+                </Button>
               </div>
             ) : null}
 
@@ -737,7 +963,7 @@ export function VideoUploadForm({
                   : uploadStatus === "starting-analysis"
                     ? "AI分析を受け付けています…"
                   : uploadStatus === "success"
-                    ? "分析中の画面へ移動します…"
+                    ? "AI分析を開始しました"
                     : uploadStatus === "analysis-error"
                       ? "分析を開始できませんでした"
                     : "S3へ動画をアップロード"}
