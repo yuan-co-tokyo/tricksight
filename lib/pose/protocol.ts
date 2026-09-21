@@ -1,5 +1,5 @@
 import type { PoseAssetUrls } from "./config";
-import type { PoseMeasurementResult } from "./types";
+import type { PoseFailureCode, PoseMeasurementResult } from "./types";
 
 export type PoseWorkerRequest =
   | {
@@ -36,5 +36,8 @@ export type PoseWorkerResponse =
     }
   | {
       id: number;
-      error: string;
+      error: {
+        code: PoseFailureCode;
+        message: string;
+      };
     };

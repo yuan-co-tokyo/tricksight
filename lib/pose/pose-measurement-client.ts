@@ -1,3 +1,4 @@
+import { POSE_LANDMARKER_CONFIG } from "./config";
 import type { PoseMeasurementResult } from "./types";
 
 export type PoseRuntimeFamily = "WEBKIT" | "CHROMIUM";
@@ -35,11 +36,21 @@ function isSaveResponse(value: unknown): value is SavePoseMeasurementResponse {
 }
 
 function persistencePayload(measurement: PoseMeasurementResult) {
+  // performance.now() is fractional, while the persistence contract and DB
+  // column intentionally use whole milliseconds. Normalize at the client/API
+  // boundary and keep the server schema strict against malformed callers.
+  const processingDurationMs =
+    measurement.processingDurationMs === null
+      ? null
+      : Math.min(
+          POSE_LANDMARKER_CONFIG.defaultTimeoutMs,
+          Math.max(0, Math.round(measurement.processingDurationMs)),
+        );
   const payload = {
     status: measurement.status,
     quality: measurement.quality,
     metrics: measurement.metrics,
-    processingDurationMs: measurement.processingDurationMs,
+    processingDurationMs,
   };
 
   return measurement.status === "FAILED"

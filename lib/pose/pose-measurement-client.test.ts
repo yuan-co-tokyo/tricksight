@@ -47,7 +47,7 @@ describe("pose measurement client", () => {
               hipVerticalRangeTorsoUnits: 0.8,
               landingTrunkTiltDeg: null,
             },
-            processingDurationMs: 1_000,
+            processingDurationMs: 411.59999990463257,
           },
         },
         { fetcher },
@@ -59,5 +59,6 @@ describe("pose measurement client", () => {
     const body = JSON.parse(String(request?.body));
     expect(body.measurement).not.toHaveProperty("metadata");
     expect(body).toMatchObject({ videoId, runtimeFamily: "CHROMIUM" });
+    expect(body.measurement.processingDurationMs).toBe(412);
   });
 });

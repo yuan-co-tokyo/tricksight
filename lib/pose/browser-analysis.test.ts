@@ -227,7 +227,38 @@ describe("startPoseVideoAnalysis core", () => {
 
     expect(result).toMatchObject({
       status: "FAILED",
-      errorCode: "NOTSUPPORTEDERROR",
+      errorCode: "VIDEO_DECODE_FAILED",
+      metrics: null,
+    });
+  });
+
+  it("Workerの初期化段階コードをFAILEDへ保ったまま返す", async () => {
+    const worker = new FakeWorker();
+    worker.postMessage = vi.fn((message: PoseWorkerRequest) => {
+      queueMicrotask(() => {
+        worker.dispatchEvent(
+          new MessageEvent("message", {
+            data: {
+              id: message.id,
+              error: {
+                code: "WASM_INITIALIZATION_FAILED",
+                message: "MediaPipe WASM initialization failed",
+              },
+            } satisfies PoseWorkerResponse,
+          }),
+        );
+      });
+    });
+
+    const result = await poseAnalysisTesting.startWithDependencies(
+      new Blob(),
+      {},
+      dependencies(frameSource(), worker),
+    ).result;
+
+    expect(result).toMatchObject({
+      status: "FAILED",
+      errorCode: "WASM_INITIALIZATION_FAILED",
       metrics: null,
     });
   });

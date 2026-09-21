@@ -59,7 +59,7 @@ function terminalResult(
       metadata: POSE_MEASUREMENT_METADATA,
       quality: null,
       metrics: null,
-      errorCode: "MODEL_LOAD_FAILED",
+      errorCode: "MODEL_DOWNLOAD_FAILED",
       processingDurationMs: 1_000,
     };
   }

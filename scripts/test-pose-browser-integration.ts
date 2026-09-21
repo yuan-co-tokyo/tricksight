@@ -27,6 +27,8 @@ const ALLOWED_WASM_FILES = new Set([
   "vision_wasm_nosimd_internal.js",
   "vision_wasm_nosimd_internal.wasm",
 ]);
+const TASKS_VISION_ASSET_ROOT =
+  `/pose-assets/tasks-vision-${POSE_LANDMARKER_CONFIG.tasksVisionVersion}`;
 
 const pageModule = `
 import { startPoseVideoAnalysis } from "/pose/browser-analysis";
@@ -39,8 +41,7 @@ window.runProductPoseIntegration = async ({ videoUrl }) => {
     timeoutMs: 60_000,
     assetUrls: {
       modelUrl: "/mediapipe/model",
-      visionBundleUrl: "/mediapipe/vision_bundle.mjs",
-      wasmBaseUrl: "/mediapipe/wasm",
+      wasmLoaderMode: "MODULE",
     },
     onProgress: (event) => progress.push(event),
   });
@@ -150,7 +151,7 @@ async function startIntegrationServer() {
         response.end(source);
         return;
       }
-      if (url.pathname === "/mediapipe/vision_bundle.mjs") {
+      if (url.pathname === `${TASKS_VISION_ASSET_ROOT}/vision_bundle.mjs`) {
         await sendFile(
           response,
           resolve("node_modules/@mediapipe/tasks-vision/vision_bundle.mjs"),
@@ -158,7 +159,7 @@ async function startIntegrationServer() {
         );
         return;
       }
-      if (url.pathname.startsWith("/mediapipe/wasm/")) {
+      if (url.pathname.startsWith(`${TASKS_VISION_ASSET_ROOT}/wasm/`)) {
         const fileName = basename(url.pathname);
         if (!ALLOWED_WASM_FILES.has(fileName)) {
           response.writeHead(404).end();

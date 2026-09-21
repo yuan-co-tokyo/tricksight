@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_POSE_ASSET_URLS,
   POSE_LANDMARKER_CONFIG,
   POSE_MEASUREMENT_METADATA,
 } from "./config";
@@ -29,6 +30,9 @@ describe("POSE_LANDMARKER_CONFIG", () => {
         sha256:
           "5134a3aad27a58b93da0088d431f366da362b44e3ccfbe3462b3827a839011b1",
       },
+      visionBundleUrl:
+        "/pose-assets/tasks-vision-1.0.1/vision_bundle.mjs",
+      wasmBaseUrl: "/pose-assets/tasks-vision-1.0.1/wasm",
     });
     expect(POSE_MEASUREMENT_METADATA).toEqual({
       algorithmVersion: "pose-landmarker-v1",
@@ -38,6 +42,12 @@ describe("POSE_LANDMARKER_CONFIG", () => {
         "5134a3aad27a58b93da0088d431f366da362b44e3ccfbe3462b3827a839011b1",
       sampleRateFps: 10,
       delegate: "CPU",
+    });
+    expect(DEFAULT_POSE_ASSET_URLS).toMatchObject({
+      visionBundleUrl:
+        "/pose-assets/tasks-vision-1.0.1/vision_bundle.mjs",
+      wasmBaseUrl: "/pose-assets/tasks-vision-1.0.1/wasm",
+      wasmLoaderMode: "CLASSIC",
     });
   });
 });

@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "pnpm pose:sync-assets",
     "dev": "next dev",
+    "prebuild": "pnpm pose:sync-assets",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -22,6 +24,7 @@
     "eval": "node --env-file=.env.local --import tsx scripts/eval-video.ts",
     "eval:pose": "node --import tsx scripts/eval-pose-landmarker.ts",
     "test:pose-integration": "node --import tsx scripts/test-pose-browser-integration.ts",
+    "pose:sync-assets": "node scripts/sync-pose-assets.mjs",
     "eval:twelvelabs": "node --env-file=.env.local --import tsx scripts/eval-twelvelabs.ts",
     "verify:twelvelabs": "node --env-file=.env.local --import tsx scripts/verify-twelvelabs.ts",
     "verify:aws": "node --env-file=.env.local --import tsx scripts/verify-aws.ts"

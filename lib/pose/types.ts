@@ -2,6 +2,24 @@ export type PoseQualityReason =
   | "POSE_COVERAGE_BELOW_THRESHOLD"
   | "LOWER_BODY_COVERAGE_BELOW_THRESHOLD";
 
+export type PoseFailureCode =
+  | "VIDEO_DECODE_FAILED"
+  | "VIDEO_METADATA_INVALID"
+  | "WORKER_BOOT_FAILED"
+  | "WORKER_MESSAGE_FAILED"
+  | "WORKER_RUNTIME_FAILED"
+  | "WORKER_PROTOCOL_FAILED"
+  | "VISION_BUNDLE_LOAD_FAILED"
+  | "MODEL_DOWNLOAD_FAILED"
+  | "MODEL_HASH_CHECK_FAILED"
+  | "MODEL_HASH_MISMATCH"
+  | "WASM_INITIALIZATION_FAILED"
+  | "LANDMARKER_INITIALIZATION_FAILED"
+  | "POSE_INFERENCE_FAILED"
+  | "POSE_FINALIZATION_FAILED"
+  | "POSE_WORKER_CLOSE_FAILED"
+  | "POSE_ANALYSIS_FAILED";
+
 export type PoseMeasurementMetrics = {
   minimumMeanKneeAngleDeg: number | null;
   /**
@@ -57,7 +75,7 @@ export type PoseMeasurementResult =
       status: "FAILED";
       quality: null;
       metrics: null;
-      errorCode: string;
+      errorCode: PoseFailureCode;
     })
   | (PoseMeasurementBase & {
       status: "TIMED_OUT" | "CANCELED";

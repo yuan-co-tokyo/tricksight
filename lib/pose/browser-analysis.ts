@@ -8,6 +8,7 @@ import type { PoseWorkerRequest, PoseWorkerResponse } from "./protocol";
 import type {
   PoseAnalysisProgress,
   PoseAnalysisTask,
+  PoseFailureCode,
   PoseMeasurementResult,
 } from "./types";
 
@@ -78,7 +79,12 @@ class PoseWorkerClient {
         this.worker.postMessage({ id, ...request }, transfer);
       } catch (error) {
         this.pending.delete(id);
-        reject(error instanceof Error ? error : new Error(String(error)));
+        reject(
+          new PoseAnalysisFailure(
+            "WORKER_MESSAGE_FAILED",
+            error instanceof Error ? error.message : String(error),
+          ),
+        );
       }
     });
   }
@@ -97,17 +103,38 @@ class PoseWorkerClient {
     const pending = this.pending.get(event.data.id);
     if (!pending) return;
     this.pending.delete(event.data.id);
-    if ("error" in event.data) pending.reject(new Error(event.data.error));
+    if ("error" in event.data) {
+      pending.reject(
+        new PoseAnalysisFailure(
+          event.data.error.code,
+          event.data.error.message,
+        ),
+      );
+    }
     else pending.resolve(event.data.result);
   };
 
   private readonly onError = (event: ErrorEvent) => {
-    this.terminate(new Error(event.message || "Pose Worker failed."));
+    this.terminate(
+      new PoseAnalysisFailure(
+        "WORKER_RUNTIME_FAILED",
+        event.message || "Pose Worker failed.",
+      ),
+    );
   };
 }
 
 class PoseCancellationError extends Error {}
 class PoseTimeoutError extends Error {}
+class PoseAnalysisFailure extends Error {
+  constructor(
+    readonly code: PoseFailureCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = "PoseAnalysisFailure";
+  }
+}
 
 function terminalResult(
   status: "CANCELED" | "TIMED_OUT",
@@ -128,13 +155,17 @@ function failureResult(
   startedAt: number,
   now: () => number,
 ): PoseMeasurementResult {
-  const name = error instanceof Error ? error.name : "UnknownError";
   return {
     status: "FAILED",
     metadata: POSE_MEASUREMENT_METADATA,
     quality: null,
     metrics: null,
-    errorCode: name.replaceAll(/[^A-Za-z0-9_]/g, "_").toUpperCase(),
+    errorCode:
+      error instanceof PoseAnalysisFailure
+        ? error.code
+        : error instanceof DOMException
+          ? "VIDEO_DECODE_FAILED"
+        : "POSE_ANALYSIS_FAILED",
     processingDurationMs: Math.max(0, now() - startedAt),
   };
 }
@@ -174,7 +205,12 @@ function waitForVideoEvent(
     };
     const onError = () => {
       cleanup();
-      reject(new Error(`Video failed while waiting for ${eventName}.`));
+      reject(
+        new PoseAnalysisFailure(
+          "VIDEO_DECODE_FAILED",
+          `Video failed while waiting for ${eventName}.`,
+        ),
+      );
     };
     const onAbort = () => {
       cleanup();
@@ -299,7 +335,10 @@ function startWithDependencies(
         !Number.isFinite(frameSource.videoHeight) ||
         frameSource.videoHeight <= 0
       ) {
-        throw new Error("Video metadata is invalid for pose measurement.");
+        throw new PoseAnalysisFailure(
+          "VIDEO_METADATA_INVALID",
+          "Video metadata is invalid for pose measurement.",
+        );
       }
       const totalFrames = Math.max(
         1,
@@ -315,7 +354,14 @@ function startWithDependencies(
         percent: 0,
       });
 
-      workerClient = new PoseWorkerClient(dependencies.createWorker());
+      try {
+        workerClient = new PoseWorkerClient(dependencies.createWorker());
+      } catch (error) {
+        throw new PoseAnalysisFailure(
+          "WORKER_BOOT_FAILED",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
       const assetUrls = { ...DEFAULT_POSE_ASSET_URLS, ...options.assetUrls };
       await workerClient.call({ type: "initialize", assetUrls });
 
@@ -346,7 +392,10 @@ function startWithDependencies(
           throw error;
         }
         if (progress.type !== "progress") {
-          throw new Error("Pose Worker returned an unexpected detect result.");
+          throw new PoseAnalysisFailure(
+            "WORKER_PROTOCOL_FAILED",
+            "Pose Worker returned an unexpected detect result.",
+          );
         }
 
         const now = dependencies.now();
@@ -382,7 +431,10 @@ function startWithDependencies(
         videoHeight: frameSource.videoHeight,
       });
       if (finished.type !== "finished") {
-        throw new Error("Pose Worker returned an unexpected finish result.");
+        throw new PoseAnalysisFailure(
+          "WORKER_PROTOCOL_FAILED",
+          "Pose Worker returned an unexpected finish result.",
+        );
       }
       await workerClient.call({ type: "close" });
       return finished.measurement;
