@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   check,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -39,6 +40,11 @@ export const userOutcomeEnum = pgEnum("user_outcome", [
   "UNCLEAR",
 ]);
 
+export const videoSpeedEnum = pgEnum("video_speed", [
+  "NORMAL",
+  "SLOW_MOTION",
+]);
+
 export const videoStatusEnum = pgEnum("video_status", [
   "PENDING_UPLOAD",
   "UPLOADED",
@@ -51,6 +57,14 @@ export const analysisStatusEnum = pgEnum("analysis_status", [
   "ANALYZING",
   "COMPLETED",
   "FAILED",
+]);
+
+export const poseMeasurementStatusEnum = pgEnum("pose_measurement_status", [
+  "COMPLETED",
+  "UNASSESSABLE",
+  "FAILED",
+  "TIMED_OUT",
+  "CANCELED",
 ]);
 
 export const tricks = pgTable(
@@ -82,6 +96,7 @@ export const practiceSessions = pgTable(
       .defaultNow()
       .notNull(),
     cameraAngle: cameraAngleEnum("camera_angle").notNull(),
+    videoSpeed: videoSpeedEnum("video_speed"),
     userOutcome: userOutcomeEnum("user_outcome").notNull(),
     memo: text("memo"),
     ...timestamps,
@@ -157,6 +172,133 @@ export const analyses = pgTable(
   ],
 );
 
+export const poseMeasurements = pgTable(
+  "pose_measurements",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    videoId: uuid("video_id")
+      .notNull()
+      .references(() => videos.id, { onDelete: "cascade" }),
+    status: poseMeasurementStatusEnum("status").notNull(),
+    qualityReasons: jsonb("quality_reasons")
+      .$type<string[]>()
+      .default(sql`'[]'::jsonb`)
+      .notNull(),
+    errorCode: text("error_code"),
+    algorithmVersion: text("algorithm_version").notNull(),
+    tasksVisionVersion: text("tasks_vision_version").notNull(),
+    modelSha256: text("model_sha256").notNull(),
+    sampleRateFps: integer("sample_rate_fps").notNull(),
+    delegate: text("delegate").notNull(),
+    runtimeFamily: text("runtime_family").notNull(),
+    frameCount: integer("frame_count"),
+    poseFrameCount: integer("pose_frame_count"),
+    lowerBodyFrameCount: integer("lower_body_frame_count"),
+    poseCoverage: doublePrecision("pose_coverage"),
+    lowerBodyCoverage: doublePrecision("lower_body_coverage"),
+    minimumMeanKneeAngleDeg: doublePrecision("minimum_mean_knee_angle_deg"),
+    kneeExtensionRangeDeg: doublePrecision("knee_extension_range_deg"),
+    hipVerticalRangeTorsoUnits: doublePrecision(
+      "hip_vertical_range_torso_units",
+    ),
+    landingTrunkTiltDeg: doublePrecision("landing_trunk_tilt_deg"),
+    processingDurationMs: integer("processing_duration_ms"),
+    completedAt: timestamp("completed_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("pose_measurements_video_id_uidx").on(table.videoId),
+    check(
+      "pose_measurements_runtime_family_check",
+      sql`${table.runtimeFamily} in ('WEBKIT', 'CHROMIUM')`,
+    ),
+    check(
+      "pose_measurements_sample_rate_fps_check",
+      sql`${table.sampleRateFps} > 0`,
+    ),
+    check(
+      "pose_measurements_processing_duration_check",
+      sql`${table.processingDurationMs} is null or ${table.processingDurationMs} >= 0`,
+    ),
+    check(
+      "pose_measurements_counts_check",
+      sql`(
+        ${table.frameCount} is null
+        and ${table.poseFrameCount} is null
+        and ${table.lowerBodyFrameCount} is null
+      ) or (
+        ${table.frameCount} > 0
+        and ${table.poseFrameCount} between 0 and ${table.frameCount}
+        and ${table.lowerBodyFrameCount} between 0 and ${table.poseFrameCount}
+      )`,
+    ),
+    check(
+      "pose_measurements_coverage_check",
+      sql`(
+        ${table.poseCoverage} is null
+        and ${table.lowerBodyCoverage} is null
+      ) or (
+        ${table.poseCoverage} between 0 and 1
+        and ${table.lowerBodyCoverage} between 0 and 1
+        and abs(
+          ${table.poseCoverage}
+          - ${table.poseFrameCount}::double precision / ${table.frameCount}
+        ) < 0.000000000001
+        and abs(
+          ${table.lowerBodyCoverage}
+          - ${table.lowerBodyFrameCount}::double precision / ${table.frameCount}
+        ) < 0.000000000001
+      )`,
+    ),
+    check(
+      "pose_measurements_metric_ranges_check",
+      sql`(${table.minimumMeanKneeAngleDeg} is null or ${table.minimumMeanKneeAngleDeg} between 0 and 180)
+        and (${table.kneeExtensionRangeDeg} is null or ${table.kneeExtensionRangeDeg} between 0 and 180)
+        and (${table.hipVerticalRangeTorsoUnits} is null or ${table.hipVerticalRangeTorsoUnits} between 0 and 10)
+        and (${table.landingTrunkTiltDeg} is null or ${table.landingTrunkTiltDeg} between 0 and 90)`,
+    ),
+    check(
+      "pose_measurements_status_payload_check",
+      sql`(
+        ${table.status} = 'COMPLETED'
+        and ${table.frameCount} is not null
+        and ${table.poseCoverage} >= 0.8
+        and ${table.lowerBodyCoverage} >= 0.8
+        and ${table.errorCode} is null
+        and ${table.qualityReasons} = '[]'::jsonb
+      ) or (
+        ${table.status} = 'UNASSESSABLE'
+        and ${table.frameCount} is not null
+        and (${table.poseCoverage} < 0.8 or ${table.lowerBodyCoverage} < 0.8)
+        and ${table.minimumMeanKneeAngleDeg} is null
+        and ${table.kneeExtensionRangeDeg} is null
+        and ${table.hipVerticalRangeTorsoUnits} is null
+        and ${table.landingTrunkTiltDeg} is null
+        and ${table.errorCode} is null
+        and jsonb_array_length(${table.qualityReasons}) > 0
+      ) or (
+        ${table.status} in ('FAILED', 'TIMED_OUT', 'CANCELED')
+        and ${table.frameCount} is null
+        and ${table.poseFrameCount} is null
+        and ${table.lowerBodyFrameCount} is null
+        and ${table.poseCoverage} is null
+        and ${table.lowerBodyCoverage} is null
+        and ${table.minimumMeanKneeAngleDeg} is null
+        and ${table.kneeExtensionRangeDeg} is null
+        and ${table.hipVerticalRangeTorsoUnits} is null
+        and ${table.landingTrunkTiltDeg} is null
+        and ${table.qualityReasons} = '[]'::jsonb
+        and (
+          (${table.status} = 'FAILED' and ${table.errorCode} is not null)
+          or (${table.status} in ('TIMED_OUT', 'CANCELED') and ${table.errorCode} is null)
+        )
+      )`,
+    ),
+  ],
+);
+
 export const trickRelations = relations(tricks, ({ many }) => ({
   sessions: many(practiceSessions),
 }));
@@ -182,6 +324,7 @@ export const videoRelations = relations(videos, ({ one, many }) => ({
     references: [practiceSessions.id],
   }),
   analyses: many(analyses),
+  poseMeasurement: one(poseMeasurements),
 }));
 
 export const analysisRelations = relations(analyses, ({ one }) => ({
@@ -190,3 +333,13 @@ export const analysisRelations = relations(analyses, ({ one }) => ({
     references: [videos.id],
   }),
 }));
+
+export const poseMeasurementRelations = relations(
+  poseMeasurements,
+  ({ one }) => ({
+    video: one(videos, {
+      fields: [poseMeasurements.videoId],
+      references: [videos.id],
+    }),
+  }),
+);

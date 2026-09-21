@@ -11,6 +11,7 @@ import {
 import {
   account,
   analyses,
+  poseMeasurements,
   practiceSessions,
   session as authSession,
   tricks,
@@ -144,6 +145,7 @@ async function verifyRuntimeDrizzleCrudAndTransaction() {
     practiceSession: randomUUID(),
     video: randomUUID(),
     analysis: randomUUID(),
+    poseMeasurement: randomUUID(),
   };
   const rollbackSignal = new Error("ROLLBACK_DATABASE_VERIFICATION");
 
@@ -185,6 +187,7 @@ async function verifyRuntimeDrizzleCrudAndTransaction() {
         userId: ids.user,
         trickId: ids.trick,
         cameraAngle: "SIDE",
+        videoSpeed: "NORMAL",
         userOutcome: "UNCLEAR",
         memo: "Database verification session",
       });
@@ -206,6 +209,28 @@ async function verifyRuntimeDrizzleCrudAndTransaction() {
         provider: "database-verification",
         modelId: "database-verification",
         promptVersion: "database-verification",
+      });
+      await tx.insert(poseMeasurements).values({
+        id: ids.poseMeasurement,
+        videoId: ids.video,
+        status: "COMPLETED",
+        qualityReasons: [],
+        algorithmVersion: "database-verification",
+        tasksVisionVersion: "1.0.1",
+        modelSha256: "0".repeat(64),
+        sampleRateFps: 10,
+        delegate: "CPU",
+        runtimeFamily: "CHROMIUM",
+        frameCount: 10,
+        poseFrameCount: 9,
+        lowerBodyFrameCount: 9,
+        poseCoverage: 0.9,
+        lowerBodyCoverage: 0.9,
+        minimumMeanKneeAngleDeg: 72.5,
+        kneeExtensionRangeDeg: 51.25,
+        hipVerticalRangeTorsoUnits: 0.81,
+        landingTrunkTiltDeg: null,
+        processingDurationMs: 100,
       });
 
       const selectedRows: Array<Array<{ id: string }>> = [];
@@ -253,6 +278,12 @@ async function verifyRuntimeDrizzleCrudAndTransaction() {
           .select({ id: analyses.id })
           .from(analyses)
           .where(eq(analyses.id, ids.analysis)),
+      );
+      selectedRows.push(
+        await tx
+          .select({ id: poseMeasurements.id })
+          .from(poseMeasurements)
+          .where(eq(poseMeasurements.id, ids.poseMeasurement)),
       );
 
       assert(
@@ -317,6 +348,13 @@ async function verifyRuntimeDrizzleCrudAndTransaction() {
           .where(eq(analyses.id, ids.analysis))
           .returning({ id: analyses.id }),
       );
+      updatedRows.push(
+        await tx
+          .update(poseMeasurements)
+          .set({ processingDurationMs: 101 })
+          .where(eq(poseMeasurements.id, ids.poseMeasurement))
+          .returning({ id: poseMeasurements.id }),
+      );
 
       assert(
         updatedRows.every((rows) => rows.length === 1),
@@ -329,6 +367,12 @@ async function verifyRuntimeDrizzleCrudAndTransaction() {
           .delete(analyses)
           .where(eq(analyses.id, ids.analysis))
           .returning({ id: analyses.id }),
+      );
+      deletedRows.push(
+        await tx
+          .delete(poseMeasurements)
+          .where(eq(poseMeasurements.id, ids.poseMeasurement))
+          .returning({ id: poseMeasurements.id }),
       );
       deletedRows.push(
         await tx
@@ -431,6 +475,12 @@ async function verifyRuntimeDrizzleCrudAndTransaction() {
       .from(analyses)
       .where(eq(analyses.id, ids.analysis)),
   );
+  remainingRows.push(
+    await db
+      .select({ id: poseMeasurements.id })
+      .from(poseMeasurements)
+      .where(eq(poseMeasurements.id, ids.poseMeasurement)),
+  );
 
   assert(
     remainingRows.every((rows) => rows.length === 0),
@@ -438,7 +488,7 @@ async function verifyRuntimeDrizzleCrudAndTransaction() {
   );
 
   console.log(
-    "Runtime Drizzle CRUD verified on all 8 public tables without named prepared statements.",
+    "Runtime Drizzle CRUD verified on all 9 public tables without named prepared statements.",
   );
   console.log("Runtime transaction rollback verified; no verification data remains.");
 }

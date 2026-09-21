@@ -5,6 +5,7 @@ import type { PoolClient } from "pg";
 export const expectedPublicTables = [
   "account",
   "analyses",
+  "pose_measurements",
   "session",
   "sessions",
   "tricks",
@@ -93,6 +94,7 @@ async function verifyAppRoleCrudInsideTransaction(
     practiceSession: randomUUID(),
     video: randomUUID(),
     analysis: randomUUID(),
+    poseMeasurement: randomUUID(),
   };
   const savepoint = "tricksight_app_rls_verification";
   const membershipResult = await client.query<{
@@ -170,8 +172,8 @@ async function verifyAppRoleCrudInsideTransaction(
     await assertAffectedOne(
       client,
       `insert into public.sessions
-       (id, user_id, trick_id, camera_angle, user_outcome)
-       values ($1, $2, $3, 'SIDE', 'UNCLEAR')`,
+       (id, user_id, trick_id, camera_angle, video_speed, user_outcome)
+       values ($1, $2, $3, 'SIDE', 'NORMAL', 'UNCLEAR')`,
       [ids.practiceSession, ids.user, ids.trick],
       "sessions insert",
     );
@@ -195,6 +197,22 @@ async function verifyAppRoleCrudInsideTransaction(
       [ids.analysis, ids.video],
       "analyses insert",
     );
+    await assertAffectedOne(
+      client,
+      `insert into public.pose_measurements
+       (id, video_id, status, algorithm_version, tasks_vision_version,
+        model_sha256, sample_rate_fps, delegate, runtime_family,
+        frame_count, pose_frame_count, lower_body_frame_count,
+        pose_coverage, lower_body_coverage,
+        minimum_mean_knee_angle_deg, knee_extension_range_deg,
+        hip_vertical_range_torso_units, landing_trunk_tilt_deg,
+        processing_duration_ms)
+       values ($1, $2, 'COMPLETED', 'security-verification', '1.0.1',
+               $3, 10, 'CPU', 'CHROMIUM', 10, 9, 9, 0.9, 0.9,
+               72.5, 51.25, 0.81, null, 100)`,
+      [ids.poseMeasurement, ids.video, "0".repeat(64)],
+      "pose_measurements insert",
+    );
 
     const selected = await client.query<{ all_rows_found: boolean }>(
       `select
@@ -206,6 +224,7 @@ async function verifyAppRoleCrudInsideTransaction(
          and exists(select 1 from public.sessions where id = $6)
          and exists(select 1 from public.videos where id = $7)
          and exists(select 1 from public.analyses where id = $8)
+         and exists(select 1 from public.pose_measurements where id = $9)
          as all_rows_found`,
       [
         ids.user,
@@ -216,6 +235,7 @@ async function verifyAppRoleCrudInsideTransaction(
         ids.practiceSession,
         ids.video,
         ids.analysis,
+        ids.poseMeasurement,
       ],
     );
 
@@ -278,12 +298,25 @@ async function verifyAppRoleCrudInsideTransaction(
       [ids.analysis],
       "analyses update",
     );
+    await assertAffectedOne(
+      client,
+      `update public.pose_measurements set processing_duration_ms = 101
+       where id = $1`,
+      [ids.poseMeasurement],
+      "pose_measurements update",
+    );
 
     await assertAffectedOne(
       client,
       "delete from public.analyses where id = $1",
       [ids.analysis],
       "analyses delete",
+    );
+    await assertAffectedOne(
+      client,
+      "delete from public.pose_measurements where id = $1",
+      [ids.poseMeasurement],
+      "pose_measurements delete",
     );
     await assertAffectedOne(
       client,

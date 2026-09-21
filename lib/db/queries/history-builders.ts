@@ -2,6 +2,7 @@ import { and, count, desc, eq, exists, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 
 import * as schema from "../schema";
+import { ownerScope, requireUserId } from "../owner-scope";
 import {
   analyses,
   practiceSessions,
@@ -61,18 +62,6 @@ export function assemblePracticeSessionPage<T>(
 export type DashboardQueryOptions = {
   recentVideoLimit?: number;
 };
-
-function requireUserId(userId: string) {
-  if (userId.trim().length === 0) {
-    throw new Error("userId is required for every history query.");
-  }
-
-  return userId;
-}
-
-function ownerScope(userId: string) {
-  return eq(practiceSessions.userId, requireUserId(userId));
-}
 
 /**
  * Analyses do not carry a user ID. Keeping this join chain in one helper makes
