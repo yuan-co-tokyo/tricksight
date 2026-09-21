@@ -8,6 +8,7 @@ import {
   CheckCircle2Icon,
   Clock3Icon,
   FileVideoIcon,
+  GaugeIcon,
   LightbulbIcon,
   SparklesIcon,
   TargetIcon,
@@ -27,7 +28,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { requireCurrentUser } from "@/lib/current-user";
-import { getPracticeSessionDetail } from "@/lib/db/queries";
+import {
+  getPoseHistoryComparison,
+  getPracticeSessionDetail,
+} from "@/lib/db/queries";
 import {
   formatTimestampSeconds,
   getCompletedAnalysisResult,
@@ -46,6 +50,7 @@ import { AnalysisProgress } from "./analysis-progress";
 import { AnalysisFailureActions } from "./analysis-failure-actions";
 import { AnalysisReanalysisAction } from "./analysis-reanalysis-action";
 import { DeleteSessionAction } from "./delete-session-action";
+import { PoseMeasurementCard } from "./pose-measurement-card";
 
 type HistoryDetailPageProps = {
   params: Promise<{ sessionId: string }>;
@@ -83,6 +88,11 @@ const cameraAngleLabels = {
   REAR: "後方",
   DIAGONAL: "斜め",
 } satisfies Record<HistoryDetail["cameraAngle"], string>;
+
+const videoSpeedLabels = {
+  NORMAL: "通常",
+  SLOW_MOTION: "スローモーション",
+} as const;
 
 const outcomePresentation = {
   LANDED: { label: "成功", className: "text-success" },
@@ -537,6 +547,14 @@ export default async function HistoryDetailPage({
 
   if (!session) notFound();
 
+  const poseComparisonPromise = getPoseHistoryComparison(user.id, {
+    practicedAt: session.practicedAt,
+    createdAt: session.createdAt,
+    trickId: session.trick.id,
+    videoSpeed: session.videoSpeed,
+    cameraAngle: session.cameraAngle,
+    videoId: session.video?.id ?? null,
+  });
   let playbackUrl: string | null = null;
   let playbackUrlFailed = false;
 
@@ -554,6 +572,7 @@ export default async function HistoryDetailPage({
       },
     });
   }
+  const poseComparison = await poseComparisonPromise;
 
   const outcome = outcomePresentation[session.userOutcome];
 
@@ -644,6 +663,17 @@ export default async function HistoryDetailPage({
               </div>
               <div className="min-w-0">
                 <dt className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <GaugeIcon aria-hidden="true" className="size-3.5" />
+                  撮影速度
+                </dt>
+                <dd className="mt-1 font-medium">
+                  {session.videoSpeed
+                    ? videoSpeedLabels[session.videoSpeed]
+                    : "未記録"}
+                </dd>
+              </div>
+              <div className="min-w-0">
+                <dt className="flex items-center gap-2 text-xs text-muted-foreground">
                   {session.userOutcome === "BAILED" ? (
                     <XCircleIcon aria-hidden="true" className="size-3.5" />
                   ) : (
@@ -668,7 +698,9 @@ export default async function HistoryDetailPage({
         </Card>
       </div>
 
-      <Card>
+      <PoseMeasurementCard state={poseComparison} />
+
+      <Card id="ai-analysis" className="scroll-mt-4">
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="space-y-1">

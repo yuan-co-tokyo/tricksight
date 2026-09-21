@@ -195,6 +195,7 @@ export function buildPracticeSessionDetailQuery(
       id: practiceSessions.id,
       practicedAt: practiceSessions.practicedAt,
       cameraAngle: practiceSessions.cameraAngle,
+      videoSpeed: practiceSessions.videoSpeed,
       userOutcome: practiceSessions.userOutcome,
       memo: practiceSessions.memo,
       createdAt: practiceSessions.createdAt,
