@@ -24,6 +24,8 @@
       #summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
       .metric { min-width: 0; border: 1px solid #2b3949; border-radius: 12px; background: #131a22; padding: 13px; }
       .metric.accent { grid-column: 1 / -1; border-color: #4c8de4; background: #13243b; }
+      .metric.success { border-color: #277a4b; }
+      .metric.failure { border-color: #9c3f3f; }
       .metric h3 { margin: 0 0 8px; color: #aab7c4; font-size: 13px; }
       .metric strong { display: block; overflow-wrap: anywhere; font-size: 20px; }
       .metric span { display: block; margin-top: 5px; color: #8997a5; font-size: 12px; }
@@ -31,6 +33,7 @@
       table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 13px; }
       th, td { border-bottom: 1px solid #2b3949; padding: 9px 6px; text-align: right; white-space: nowrap; }
       th:first-child { text-align: left; }
+      td.wrap { min-width: 220px; white-space: normal; overflow-wrap: anywhere; }
       dl { margin: 16px 0; }
       dl div { padding: 8px 0; border-bottom: 1px solid #263341; }
       dt { color: #8997a5; font-size: 12px; }
@@ -45,7 +48,7 @@
   <body>
     <main>
       <h1>iPhone骨格計測診断</h1>
-      <p class="notice">製品と同じfullモデル・CPU・10fpsで計測します。動画はこの端末内だけで処理され、サーバには送信されません。計測中は画面を閉じず、そのままお待ちください。</p>
+      <p class="notice">1回の動画選択で、A1（非表示video + play）、A2（1px video + play）、B（WebCodecs）の3方式を個別に検証します。A方式が成功した場合は、製品と同じfullモデル・CPU・10fpsのフォーム計測まで実行します。動画はこの端末内だけで処理され、サーバには送信されません。</p>
       <label>
         動画を選ぶと自動で計測開始
         <input id="video-file" type="file" accept="video/mp4,video/quicktime,video/*" />

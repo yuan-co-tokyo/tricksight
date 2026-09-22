@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { access, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  readFile,
+  readdir,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
 import { basename, extname, resolve } from "node:path";
 
@@ -15,6 +22,7 @@ const MODEL_PATH = resolve(
   `${POSE_LANDMARKER_CONFIG.model.name}.task`,
 );
 const TASKS_VISION_ROOT = resolve("node_modules/@mediapipe/tasks-vision");
+const MP4BOX_ROOT = resolve("node_modules/mp4box/dist");
 const ALLOWED_WASM_FILES = new Set([
   "vision_wasm_internal.js",
   "vision_wasm_internal.wasm",
@@ -81,13 +89,17 @@ async function main() {
   if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65_535) {
     throw new Error("PORT must be an integer between 1 and 65535.");
   }
-  await Promise.all([
+  const [, , , , , mp4boxFiles] = await Promise.all([
     ensurePinnedModel(),
     access(resolve(DIAGNOSTIC_ROOT, "index.html")),
     access(resolve(DIAGNOSTIC_ROOT, "page.mjs")),
     access(resolve(DIAGNOSTIC_ROOT, "worker.mjs")),
     access(resolve(TASKS_VISION_ROOT, "vision_bundle.mjs")),
+    readdir(MP4BOX_ROOT),
   ]);
+  const allowedMp4boxFiles = new Set(
+    mp4boxFiles.filter((fileName) => fileName.endsWith(".mjs")),
+  );
 
   const server = createServer((request, response) => {
     void (async () => {
@@ -106,6 +118,15 @@ async function main() {
       }
       if (url.pathname === "/worker.mjs") {
         await serveFile(response, resolve(DIAGNOSTIC_ROOT, "worker.mjs"));
+        return;
+      }
+      if (url.pathname.startsWith("/vendor/mp4box/")) {
+        const fileName = basename(url.pathname);
+        if (!allowedMp4boxFiles.has(fileName)) {
+          response.writeHead(404).end();
+          return;
+        }
+        await serveFile(response, resolve(MP4BOX_ROOT, fileName));
         return;
       }
       if (url.pathname === "/mediapipe/vision_bundle.mjs") {

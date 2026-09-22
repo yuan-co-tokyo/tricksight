@@ -30,20 +30,42 @@ async function main() {
         await page.locator("#result-json").innerText(),
       ) as {
         status: string;
-        requestedFrames: number;
-        processedFrames: number;
-        timing: {
-          seek: { count: number };
-          inference: { count: number };
+        adoptionCandidate: string;
+        methods: {
+          a1HiddenPlay: { status: string };
+          a2RenderedPlay: { status: string };
+          webCodecs: {
+            status: string;
+            expectedSamples: number;
+            decodedFrames: number;
+          };
+        };
+        poseMeasurement: {
+          status: string;
+          requestedFrames: number;
+          processedFrames: number;
+          timing: {
+            seek: { count: number };
+            inference: { count: number };
+          };
         };
       };
+      const pose = result.poseMeasurement;
       if (
         result.status !== "COMPLETED" ||
-        result.processedFrames !== result.requestedFrames ||
-        result.timing.seek.count !== result.requestedFrames ||
-        result.timing.inference.count !== result.requestedFrames
+        result.methods.a1HiddenPlay.status !== "SUCCEEDED" ||
+        result.methods.a2RenderedPlay.status !== "SUCCEEDED" ||
+        result.methods.webCodecs.status !== "SUCCEEDED" ||
+        result.methods.webCodecs.decodedFrames !==
+          result.methods.webCodecs.expectedSamples ||
+        pose.status !== "SUCCEEDED" ||
+        pose.processedFrames !== pose.requestedFrames ||
+        pose.timing.seek.count !== pose.requestedFrames ||
+        pose.timing.inference.count !== pose.requestedFrames
       ) {
-        throw new Error(`${name}: invalid diagnostic result ${JSON.stringify(result)}`);
+        throw new Error(
+          `${name}: invalid diagnostic result ${JSON.stringify(result)}`,
+        );
       }
       await page.screenshot({
         fullPage: true,
@@ -52,8 +74,10 @@ async function main() {
       console.log(
         JSON.stringify({
           browser: name,
-          frames: result.processedFrames,
-          timing: result.timing,
+          adoptionCandidate: result.adoptionCandidate,
+          methods: result.methods,
+          frames: pose.processedFrames,
+          timing: pose.timing,
         }),
       );
     } finally {
