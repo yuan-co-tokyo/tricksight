@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Tricksight iPhone骨格計測診断</title>
+    <style>
+      :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; background: #0d1117; color: #f0f4f8; }
+      * { box-sizing: border-box; }
+      body { margin: 0; }
+      main { width: min(100% - 24px, 760px); margin: 0 auto; padding: 24px 0 64px; }
+      h1 { margin: 0 0 8px; font-size: clamp(24px, 7vw, 36px); line-height: 1.2; }
+      h2 { margin: 28px 0 12px; font-size: 19px; }
+      p { line-height: 1.6; color: #b8c2cc; }
+      .notice { border: 1px solid #31445a; border-radius: 12px; background: #121a24; padding: 14px; }
+      label { display: block; margin-top: 20px; border: 2px solid #68a8ff; border-radius: 12px; background: #17335a; padding: 16px; text-align: center; font-weight: 700; }
+      input { display: block; width: 100%; margin-top: 10px; font: inherit; }
+      #status { margin: 18px 0 8px; min-height: 28px; font-weight: 700; color: #a9cfff; }
+      #status[data-state="done"] { color: #71db9e; }
+      #status[data-state="error"] { color: #ff8b8b; }
+      .progress-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
+      progress { width: 100%; height: 18px; }
+      #summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+      .metric { min-width: 0; border: 1px solid #2b3949; border-radius: 12px; background: #131a22; padding: 13px; }
+      .metric.accent { grid-column: 1 / -1; border-color: #4c8de4; background: #13243b; }
+      .metric h3 { margin: 0 0 8px; color: #aab7c4; font-size: 13px; }
+      .metric strong { display: block; overflow-wrap: anywhere; font-size: 20px; }
+      .metric span { display: block; margin-top: 5px; color: #8997a5; font-size: 12px; }
+      #details { overflow-x: auto; }
+      table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 13px; }
+      th, td { border-bottom: 1px solid #2b3949; padding: 9px 6px; text-align: right; white-space: nowrap; }
+      th:first-child { text-align: left; }
+      dl { margin: 16px 0; }
+      dl div { padding: 8px 0; border-bottom: 1px solid #263341; }
+      dt { color: #8997a5; font-size: 12px; }
+      dd { margin: 3px 0 0; overflow-wrap: anywhere; line-height: 1.45; }
+      button { width: 100%; min-height: 48px; border: 1px solid #68a8ff; border-radius: 10px; background: #17335a; color: white; font: inherit; font-weight: 700; }
+      button:disabled { opacity: .45; }
+      pre { max-height: 360px; overflow: auto; border: 1px solid #2b3949; border-radius: 10px; background: #080b0f; padding: 12px; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+      video { position: fixed; width: 1px; height: 1px; opacity: .01; pointer-events: none; }
+      @media (min-width: 620px) { #summary { grid-template-columns: repeat(3, minmax(0, 1fr)); } .metric.accent { grid-column: span 3; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>iPhone骨格計測診断</h1>
+      <p class="notice">製品と同じfullモデル・CPU・10fpsで計測します。動画はこの端末内だけで処理され、サーバには送信されません。計測中は画面を閉じず、そのままお待ちください。</p>
+      <label>
+        動画を選ぶと自動で計測開始
+        <input id="video-file" type="file" accept="video/mp4,video/quicktime,video/*" />
+      </label>
+      <div id="status">動画を選択してください。</div>
+      <div class="progress-row">
+        <progress id="progress" value="0" max="1"></progress>
+        <span id="progress-label">0 / 0</span>
+      </div>
+      <section id="summary" aria-label="計測結果"></section>
+      <section id="details"></section>
+      <h2>報告用JSON</h2>
+      <button id="copy-result" type="button" disabled>JSONをコピー</button>
+      <pre id="result-json"></pre>
+    </main>
+    <script type="module" src="/page.mjs"></script>
+  </body>
+</html>

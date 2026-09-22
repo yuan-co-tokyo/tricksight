@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Generated, pinned third-party MediaPipe runtime assets.
+    "public/pose-assets/**",
   ]),
 ]);
 
