@@ -28,6 +28,7 @@ type VisionModule = {
       vision: unknown,
       options: {
         baseOptions: { modelAssetBuffer: Uint8Array; delegate: "CPU" };
+        canvas: OffscreenCanvas;
         runningMode: "VIDEO";
         numPoses: number;
         minPoseDetectionConfidence: number;
@@ -89,6 +90,12 @@ async function initialize(request: Extract<PoseWorkerRequest, { type: "initializ
   poseLandmarker = null;
   frames = [];
   analysisStartedAt = performance.now();
+  if (typeof OffscreenCanvas === "undefined") {
+    throw new PoseWorkerFailure(
+      "OFFSCREEN_CANVAS_UNAVAILABLE",
+      "OffscreenCanvas is unavailable; optional pose measurement was skipped to keep upload and AI analysis responsive.",
+    );
+  }
 
   const startedAt = performance.now();
   const [visionModuleResult, modelResponseResult] = await Promise.allSettled([
@@ -163,6 +170,11 @@ async function initialize(request: Extract<PoseWorkerRequest, { type: "initializ
           modelAssetBuffer: new Uint8Array(modelBuffer),
           delegate: POSE_LANDMARKER_CONFIG.delegate,
         },
+        // MediaPipe 1.0.1 misclassifies CriOS because its UA has Safari but no
+        // Version/ token, then tries document.createElement inside the Worker.
+        // Passing the native canvas bypasses that heuristic through its public
+        // option while keeping all inference off the main thread.
+        canvas: new OffscreenCanvas(1, 1),
         runningMode: "VIDEO",
         numPoses: POSE_LANDMARKER_CONFIG.numPoses,
         minPoseDetectionConfidence: thresholds.detection,

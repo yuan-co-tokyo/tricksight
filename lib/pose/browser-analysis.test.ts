@@ -98,6 +98,25 @@ afterEach(() => {
 });
 
 describe("startPoseVideoAnalysis core", () => {
+  it("FrameSource生成を最初のmicrotaskより前に同期開始する", async () => {
+    const source = frameSource();
+    let startedSynchronously = false;
+    const deps = dependencies(source);
+    deps.createFrameSource = vi.fn(() => {
+      startedSynchronously = true;
+      return Promise.resolve(source);
+    });
+
+    const task = poseAnalysisTesting.startWithDependencies(
+      new Blob(),
+      {},
+      deps,
+    );
+
+    expect(startedSynchronously).toBe(true);
+    await task.result;
+  });
+
   it("固定10fpsで処理し、進捗と集約4指標だけを返す", async () => {
     const source = frameSource();
     const progress = vi.fn();
@@ -119,6 +138,11 @@ describe("startPoseVideoAnalysis core", () => {
       },
     });
     expect(source.frameAt).toHaveBeenCalledTimes(5);
+    expect(source.frameAt).toHaveBeenNthCalledWith(
+      1,
+      0,
+      expect.any(AbortSignal),
+    );
     expect(progress).toHaveBeenCalledWith({
       phase: "INITIALIZING",
       processedFrames: 0,
@@ -261,6 +285,43 @@ describe("startPoseVideoAnalysis core", () => {
       errorCode: "WASM_INITIALIZATION_FAILED",
       metrics: null,
     });
+  });
+
+  it("OffscreenCanvas非対応はPoseのみFAILEDにして明示コードを保つ", async () => {
+    const firstBitmap = bitmap();
+    const source = frameSource({
+      frameAt: vi.fn(async () => firstBitmap),
+    });
+    const worker = new FakeWorker();
+    worker.postMessage = vi.fn((message: PoseWorkerRequest) => {
+      queueMicrotask(() => {
+        worker.dispatchEvent(
+          new MessageEvent("message", {
+            data: {
+              id: message.id,
+              error: {
+                code: "OFFSCREEN_CANVAS_UNAVAILABLE",
+                message: "OffscreenCanvas is unavailable",
+              },
+            } satisfies PoseWorkerResponse,
+          }),
+        );
+      });
+    });
+
+    const result = await poseAnalysisTesting.startWithDependencies(
+      new Blob(),
+      {},
+      dependencies(source, worker),
+    ).result;
+
+    expect(result).toMatchObject({
+      status: "FAILED",
+      errorCode: "OFFSCREEN_CANVAS_UNAVAILABLE",
+      metrics: null,
+    });
+    expect(firstBitmap.close).toHaveBeenCalledOnce();
+    expect(source.close).toHaveBeenCalledOnce();
   });
 
   it("Worker転送失敗時もImageBitmapとframe sourceを解放する", async () => {

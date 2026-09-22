@@ -190,7 +190,7 @@ function createDefaultWorker() {
 
 function waitForVideoEvent(
   video: HTMLVideoElement,
-  eventName: "loadedmetadata" | "loadeddata" | "seeked",
+  eventName: "playing" | "seeked",
   signal: AbortSignal,
 ) {
   return new Promise<void>((resolve, reject) => {
@@ -227,6 +227,76 @@ function waitForVideoEvent(
   });
 }
 
+function waitForFirstVideoFrame(
+  video: HTMLVideoElement,
+  signal: AbortSignal,
+) {
+  if (typeof video.requestVideoFrameCallback !== "function") {
+    const waiterController = new AbortController();
+    const forwardAbort = () => waiterController.abort(signal.reason);
+    if (signal.aborted) forwardAbort();
+    else signal.addEventListener("abort", forwardAbort, { once: true });
+    return {
+      promise: waitForVideoEvent(
+        video,
+        "playing",
+        waiterController.signal,
+      ).finally(() => signal.removeEventListener("abort", forwardAbort)),
+      cancel(error: unknown) {
+        waiterController.abort(error);
+      },
+    };
+  }
+
+  let callbackId: number | null = null;
+  let rejectWait: ((reason?: unknown) => void) | null = null;
+  let settled = false;
+  const cleanup = () => {
+    video.removeEventListener("error", onError);
+    signal.removeEventListener("abort", onAbort);
+    if (callbackId !== null) {
+      video.cancelVideoFrameCallback(callbackId);
+      callbackId = null;
+    }
+  };
+  const fail = (error: unknown) => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    rejectWait?.(error);
+  };
+  const onError = () =>
+    fail(
+      new PoseAnalysisFailure(
+        "VIDEO_DECODE_FAILED",
+        "Video failed while waiting for its first presented frame.",
+      ),
+    );
+  const onAbort = () =>
+    fail(
+      signal.reason instanceof Error
+        ? signal.reason
+        : new PoseCancellationError(),
+    );
+  const promise = new Promise<void>((resolve, reject) => {
+    rejectWait = reject;
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    video.addEventListener("error", onError, { once: true });
+    signal.addEventListener("abort", onAbort, { once: true });
+    callbackId = video.requestVideoFrameCallback(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve();
+    });
+  });
+
+  return { promise, cancel: fail };
+}
+
 async function createBrowserFrameSource(videoBlob: Blob, signal: AbortSignal) {
   const video = document.createElement("video");
   const objectUrl = URL.createObjectURL(videoBlob);
@@ -245,14 +315,24 @@ async function createBrowserFrameSource(videoBlob: Blob, signal: AbortSignal) {
     URL.revokeObjectURL(objectUrl);
   };
 
+  const firstFrame = waitForFirstVideoFrame(video, signal);
+  let playPromise: Promise<void>;
   try {
-    if (video.readyState < HTMLMediaElement.HAVE_METADATA) {
-      await waitForVideoEvent(video, "loadedmetadata", signal);
-    }
-    if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
-      await waitForVideoEvent(video, "loadeddata", signal);
-    }
+    // Keep this direct call before this async function's first await. The
+    // caller starts analysis inside the trusted file-input change handler, so
+    // iOS can use that transient user activation to decode real frame data.
+    playPromise = video.play();
   } catch (error) {
+    firstFrame.cancel(error);
+    close();
+    throw error;
+  }
+
+  try {
+    await Promise.all([playPromise, firstFrame.promise]);
+    video.pause();
+  } catch (error) {
+    firstFrame.cancel(error);
     close();
     throw error;
   }
@@ -300,6 +380,7 @@ function startWithDependencies(
   let abortKind: "CANCELED" | "TIMED_OUT" | null = null;
   let workerClient: PoseWorkerClient | null = null;
   let frameSource: FrameSource | null = null;
+  let primedBitmap: ImageBitmap | null = null;
 
   const abort = (kind: "CANCELED" | "TIMED_OUT") => {
     if (abortController.signal.aborted) return;
@@ -363,7 +444,26 @@ function startWithDependencies(
         );
       }
       const assetUrls = { ...DEFAULT_POSE_ASSET_URLS, ...options.assetUrls };
-      await workerClient.call({ type: "initialize", assetUrls });
+      // iOS pays a one-time createImageBitmap cost of about one second. Start
+      // that work while the Worker loads WASM/model data, then reuse the same
+      // bitmap for frame zero instead of adding the costs serially.
+      const [initialization, firstFrame] = await Promise.allSettled([
+        workerClient.call({ type: "initialize", assetUrls }),
+        frameSource.frameAt(0, abortController.signal),
+      ]);
+      if (initialization.status === "rejected") {
+        if (firstFrame.status === "fulfilled") firstFrame.value.close();
+        throw initialization.reason;
+      }
+      if (initialization.value.type !== "initialized") {
+        if (firstFrame.status === "fulfilled") firstFrame.value.close();
+        throw new PoseAnalysisFailure(
+          "WORKER_PROTOCOL_FAILED",
+          "Pose Worker returned an unexpected initialize result.",
+        );
+      }
+      if (firstFrame.status === "rejected") throw firstFrame.reason;
+      primedBitmap = firstFrame.value;
 
       let lastProgressAt = dependencies.now();
       for (let index = 0; index < totalFrames; index += 1) {
@@ -371,10 +471,14 @@ function startWithDependencies(
         const timestampMs = Math.round(
           (index * 1_000) / POSE_LANDMARKER_CONFIG.sampleRateFps,
         );
-        const bitmap = await frameSource.frameAt(
-          timestampMs,
-          abortController.signal,
-        );
+        const bitmap =
+          index === 0 && primedBitmap
+            ? primedBitmap
+            : await frameSource.frameAt(
+                timestampMs,
+                abortController.signal,
+              );
+        primedBitmap = null;
         let progress: PoseWorkerResult;
         try {
           progress = await workerClient.call(
@@ -449,6 +553,7 @@ function startWithDependencies(
     } finally {
       clearTimeout(timeout);
       options.signal?.removeEventListener("abort", onExternalAbort);
+      primedBitmap?.close();
       frameSource?.close();
       workerClient?.terminate();
     }

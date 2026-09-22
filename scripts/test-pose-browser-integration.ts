@@ -33,10 +33,18 @@ const TASKS_VISION_ASSET_ROOT =
 const pageModule = `
 import { startPoseVideoAnalysis } from "/pose/browser-analysis";
 
+const originalPlay = HTMLMediaElement.prototype.play;
+let playCallCount = 0;
+HTMLMediaElement.prototype.play = function () {
+  playCallCount += 1;
+  return originalPlay.call(this);
+};
+
 window.runProductPoseIntegration = async ({ videoUrl }) => {
   const response = await fetch(videoUrl);
   if (!response.ok) throw new Error(\`Video fetch failed: \${response.status}\`);
   const progress = [];
+  const playCallsBeforeStart = playCallCount;
   const task = startPoseVideoAnalysis(await response.blob(), {
     timeoutMs: 60_000,
     assetUrls: {
@@ -45,7 +53,8 @@ window.runProductPoseIntegration = async ({ videoUrl }) => {
     },
     onProgress: (event) => progress.push(event),
   });
-  return { result: await task.result, progress };
+  const synchronousPlayCalls = playCallCount - playCallsBeforeStart;
+  return { result: await task.result, progress, synchronousPlayCalls };
 };
 `;
 
@@ -233,15 +242,17 @@ type IntegrationOutput = {
     quality: { frameCount: number } | null;
   };
   progress: Array<{ phase: string; processedFrames: number; totalFrames: number }>;
+  synchronousPlayCalls: number;
 };
 
 async function verifyBrowser(
-  name: "chromium" | "webkit",
+  name: "chromium" | "webkit" | "crios-simulated",
   browserType: BrowserType,
   origin: string,
+  userAgent?: string,
 ) {
   const browser = await browserType.launch({ headless: true });
-  const page = await browser.newPage();
+  const page = await browser.newPage({ userAgent });
   page.setDefaultTimeout(0);
   page.on("console", (message) =>
     console.log(`[${name}:${message.type()}] ${message.text()}`),
@@ -264,6 +275,11 @@ async function verifyBrowser(
       if (output.result.status !== "COMPLETED") {
         throw new Error(
           `${name}/${extension}: expected COMPLETED, received ${JSON.stringify(output.result)}`,
+        );
+      }
+      if (output.synchronousPlayCalls !== 1) {
+        throw new Error(
+          `${name}/${extension}: expected one synchronous play(), received ${output.synchronousPlayCalls}`,
         );
       }
       const metrics = output.result.metrics;
@@ -293,6 +309,7 @@ async function verifyBrowser(
           frameCount: output.result.quality?.frameCount,
           metrics,
           progressEvents: output.progress.length,
+          synchronousPlayCalls: output.synchronousPlayCalls,
         }),
       );
     }
@@ -307,6 +324,12 @@ async function main() {
   try {
     await verifyBrowser("chromium", chromium, server.origin);
     await verifyBrowser("webkit", webkit, server.origin);
+    await verifyBrowser(
+      "crios-simulated",
+      chromium,
+      server.origin,
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/153.0.8010.12 Mobile/15E148 Safari/604.1",
+    );
   } finally {
     await server.close();
   }
