@@ -10,14 +10,37 @@ const videoPath = resolve(
 async function main() {
   const screenshotDirectory = resolve("eval/output/ios-pose-diagnostic");
   await mkdir(screenshotDirectory, { recursive: true });
-  for (const [name, browserType] of [
-    ["chromium", chromium],
-    ["webkit", webkit],
+  for (const {
+    name,
+    browserType,
+    userAgent,
+    defaultWorkerSucceeds,
+  } of [
+    {
+      name: "chromium",
+      browserType: chromium,
+      userAgent: undefined,
+      defaultWorkerSucceeds: true,
+    },
+    {
+      name: "webkit",
+      browserType: webkit,
+      userAgent: undefined,
+      defaultWorkerSucceeds: true,
+    },
+    {
+      name: "crios-simulated",
+      browserType: chromium,
+      userAgent:
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/153.0.8010.12 Mobile/15E148 Safari/604.1",
+      defaultWorkerSucceeds: false,
+    },
   ] as const) {
     const browser = await browserType.launch({ headless: true });
     const page = await browser.newPage({
       hasTouch: true,
       isMobile: true,
+      userAgent,
       viewport: { width: 390, height: 844 },
     });
     page.setDefaultTimeout(300_000);
@@ -29,8 +52,11 @@ async function main() {
       const result = JSON.parse(
         await page.locator("#result-json").innerText(),
       ) as {
+        schemaVersion: number;
         status: string;
-        adoptionCandidate: string;
+        frameSourceDecision: string;
+        poseInputFrameSourceMethod: string;
+        poseImplementationCandidate: string;
         methods: {
           a1HiddenPlay: { status: string };
           a2RenderedPlay: { status: string };
@@ -40,28 +66,80 @@ async function main() {
             decodedFrames: number;
           };
         };
-        poseMeasurement: {
-          status: string;
-          requestedFrames: number;
-          processedFrames: number;
-          timing: {
-            seek: { count: number };
-            inference: { count: number };
+        poseMethods: {
+          c0DefaultWorker: {
+            status: string;
+            error?: string;
+            environment: {
+              documentAvailable: boolean;
+              offscreenCanvasAvailable: boolean;
+              offscreenCanvasWebgl2: boolean;
+              mediaPipeSupportsOffscreenCanvas: boolean;
+            };
+          };
+          c1ExplicitOffscreenWorker: {
+            status: string;
+            executionThread: string;
+            canvasMode: string;
+            frameSourceMethod: string;
+            requestedFrames: number;
+            processedFrames: number;
+            timing: {
+              seek: { count: number };
+              inference: { count: number };
+            };
+          };
+          c2MainThreadCanvas: {
+            status: string;
+            executionThread: string;
+            canvasMode: string;
+            frameSourceMethod: string;
+            requestedFrames: number;
+            processedFrames: number;
+            maxMainThreadBlockMs: number;
+            timing: {
+              seek: { count: number };
+              inference: { count: number };
+            };
           };
         };
       };
-      const pose = result.poseMeasurement;
+      const { c0DefaultWorker: c0, c1ExplicitOffscreenWorker: c1, c2MainThreadCanvas: c2 } =
+        result.poseMethods;
       if (
+        result.schemaVersion !== 3 ||
         result.status !== "COMPLETED" ||
+        result.frameSourceDecision !== "PENDING" ||
+        result.poseInputFrameSourceMethod !== "A1_HIDDEN_PLAY" ||
+        result.poseImplementationCandidate !==
+          "C1_EXPLICIT_OFFSCREEN_WORKER" ||
         result.methods.a1HiddenPlay.status !== "SUCCEEDED" ||
         result.methods.a2RenderedPlay.status !== "SUCCEEDED" ||
         result.methods.webCodecs.status !== "SUCCEEDED" ||
         result.methods.webCodecs.decodedFrames !==
           result.methods.webCodecs.expectedSamples ||
-        pose.status !== "SUCCEEDED" ||
-        pose.processedFrames !== pose.requestedFrames ||
-        pose.timing.seek.count !== pose.requestedFrames ||
-        pose.timing.inference.count !== pose.requestedFrames
+        c0.status !== (defaultWorkerSucceeds ? "SUCCEEDED" : "FAILED") ||
+        (!defaultWorkerSucceeds && !c0.error?.includes("document")) ||
+        c0.environment.documentAvailable ||
+        !c0.environment.offscreenCanvasAvailable ||
+        !c0.environment.offscreenCanvasWebgl2 ||
+        c0.environment.mediaPipeSupportsOffscreenCanvas !==
+          defaultWorkerSucceeds ||
+        c1.status !== "SUCCEEDED" ||
+        c1.executionThread !== "WORKER" ||
+        c1.canvasMode !== "EXPLICIT_OFFSCREEN" ||
+        c1.frameSourceMethod !== result.poseInputFrameSourceMethod ||
+        c1.processedFrames !== c1.requestedFrames ||
+        c1.timing.seek.count !== c1.requestedFrames ||
+        c1.timing.inference.count !== c1.requestedFrames ||
+        c2.status !== "SUCCEEDED" ||
+        c2.executionThread !== "MAIN" ||
+        c2.canvasMode !== "EXPLICIT_HTML_CANVAS" ||
+        c2.frameSourceMethod !== result.poseInputFrameSourceMethod ||
+        c2.processedFrames !== c2.requestedFrames ||
+        c2.timing.seek.count !== c2.requestedFrames ||
+        c2.timing.inference.count !== c2.requestedFrames ||
+        !(c2.maxMainThreadBlockMs > 0)
       ) {
         throw new Error(
           `${name}: invalid diagnostic result ${JSON.stringify(result)}`,
@@ -74,10 +152,26 @@ async function main() {
       console.log(
         JSON.stringify({
           browser: name,
-          adoptionCandidate: result.adoptionCandidate,
-          methods: result.methods,
-          frames: pose.processedFrames,
-          timing: pose.timing,
+          poseImplementationCandidate: result.poseImplementationCandidate,
+          poseInputFrameSourceMethod: result.poseInputFrameSourceMethod,
+          methods: Object.fromEntries(
+            Object.entries(result.methods).map(([method, value]) => [
+              method,
+              value.status,
+            ]),
+          ),
+          c0Environment: c0.environment,
+          c1: {
+            status: c1.status,
+            frames: c1.processedFrames,
+            timing: c1.timing,
+          },
+          c2: {
+            status: c2.status,
+            frames: c2.processedFrames,
+            maxMainThreadBlockMs: c2.maxMainThreadBlockMs,
+            timing: c2.timing,
+          },
         }),
       );
     } finally {

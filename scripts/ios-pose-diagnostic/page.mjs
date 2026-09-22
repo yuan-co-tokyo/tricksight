@@ -4,6 +4,10 @@ import {
   MP4BoxBuffer,
   createFile as createMp4File,
 } from "/vendor/mp4box/mp4box.all.mjs";
+import {
+  FilesetResolver,
+  PoseLandmarker,
+} from "/mediapipe/vision_bundle.mjs";
 
 const SAMPLE_RATE_FPS = 10;
 const VIDEO_EVENT_TIMEOUT_MS = 180_000;
@@ -438,41 +442,39 @@ function roundedSummary(summary) {
   );
 }
 
-async function runPoseMeasurement(video) {
+function assertValidPoseVideo(video) {
+  if (
+    !Number.isFinite(video.duration) ||
+    video.duration <= 0 ||
+    video.videoWidth <= 0 ||
+    video.videoHeight <= 0
+  ) {
+    throw new Error("Video metadata is invalid after priming.");
+  }
+}
+
+async function runPoseFrames(video, runner) {
   const startedAt = performance.now();
   const frameMeasurements = [];
-  let workerClient = null;
   try {
-    if (
-      !Number.isFinite(video.duration) ||
-      video.duration <= 0 ||
-      video.videoWidth <= 0 ||
-      video.videoHeight <= 0
-    ) {
-      throw new Error("Video metadata is invalid after priming.");
-    }
+    assertValidPoseVideo(video);
     const requestedFrames = Math.max(1, Math.floor(video.duration * SAMPLE_RATE_FPS));
     progressElement.max = requestedFrames;
     progressElement.value = 0;
-    progressLabel.textContent = `0 / ${requestedFrames}`;
-    statusElement.textContent = "fullモデルを初期化しています…";
-    workerClient = new DiagnosticWorkerClient();
-    const initialized = await workerClient.call("initialize");
+    progressLabel.textContent = `${runner.shortLabel} 0 / ${requestedFrames}`;
+    statusElement.textContent = `${runner.label}でfullモデルを初期化しています…`;
+    const initialized = await runner.initialize();
 
     for (let index = 0; index < requestedFrames; index += 1) {
       const timestampMs = Math.round((index * 1_000) / SAMPLE_RATE_FPS);
-      statusElement.textContent = `フォーム計測中: ${index + 1} / ${requestedFrames}フレーム`;
+      statusElement.textContent = `${runner.label}: ${index + 1} / ${requestedFrames}フレーム`;
       const seek = await seekTo(video, timestampMs / 1_000);
       const bitmapStartedAt = performance.now();
       const bitmap = await createImageBitmap(video);
       const bitmapMs = performance.now() - bitmapStartedAt;
       const roundTripStartedAt = performance.now();
-      const detected = await workerClient.call(
-        "detect",
-        { bitmap, timestampMs },
-        [bitmap],
-      );
-      const workerRoundTripMs = performance.now() - roundTripStartedAt;
+      const detected = await runner.detect(bitmap, timestampMs);
+      const executionRoundTripMs = performance.now() - roundTripStartedAt;
       frameMeasurements.push({
         index,
         timestampMs,
@@ -480,21 +482,25 @@ async function runPoseMeasurement(video) {
         seekEventFired: seek.eventFired,
         bitmapMs: round(bitmapMs, 3),
         inferenceMs: round(detected.inferenceMs, 3),
-        workerRoundTripMs: round(workerRoundTripMs, 3),
+        executionRoundTripMs: round(executionRoundTripMs, 3),
         poseDetected: detected.poseCount > 0,
       });
       progressElement.value = index + 1;
-      progressLabel.textContent = `${index + 1} / ${requestedFrames}`;
+      progressLabel.textContent = `${runner.shortLabel} ${index + 1} / ${requestedFrames}`;
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
 
     const seek = summarize(frameMeasurements.map((frame) => frame.seekMs));
     const bitmap = summarize(frameMeasurements.map((frame) => frame.bitmapMs));
     const inference = summarize(frameMeasurements.map((frame) => frame.inferenceMs));
-    const workerRoundTrip = summarize(
-      frameMeasurements.map((frame) => frame.workerRoundTripMs),
+    const executionRoundTrip = summarize(
+      frameMeasurements.map((frame) => frame.executionRoundTripMs),
     );
     return {
+      method: runner.method,
+      executionThread: runner.executionThread,
+      canvasMode: runner.canvasMode,
+      frameSourceMethod: runner.frameSourceMethod,
       status: "SUCCEEDED",
       totalMs: round(performance.now() - startedAt),
       video: videoSnapshot(video),
@@ -507,12 +513,18 @@ async function runPoseMeasurement(video) {
         seek: roundedSummary(seek),
         bitmap: roundedSummary(bitmap),
         inference: roundedSummary(inference),
-        workerRoundTrip: roundedSummary(workerRoundTrip),
+        executionRoundTrip: roundedSummary(executionRoundTrip),
       },
+      maxMainThreadBlockMs:
+        runner.executionThread === "MAIN" ? round(inference.maxMs) : null,
       frames: frameMeasurements,
     };
   } catch (error) {
     return {
+      method: runner.method,
+      executionThread: runner.executionThread,
+      canvasMode: runner.canvasMode,
+      frameSourceMethod: runner.frameSourceMethod,
       status: "FAILED",
       totalMs: round(performance.now() - startedAt),
       processedFrames: frameMeasurements.length,
@@ -520,8 +532,130 @@ async function runPoseMeasurement(video) {
       frames: frameMeasurements,
     };
   } finally {
-    await workerClient?.close().catch(() => {});
+    await runner.close().catch(() => {});
   }
+}
+
+async function runDefaultWorkerTrial() {
+  const startedAt = performance.now();
+  const workerClient = new DiagnosticWorkerClient();
+  let environment = null;
+  try {
+    environment = await workerClient.call("environment");
+    statusElement.textContent = "C0: MediaPipe既定Worker初期化を確認しています…";
+    const initialized = await workerClient.call("initialize", {
+      canvasMode: "DEFAULT",
+    });
+    return {
+      method: "C0_DEFAULT_WORKER",
+      status: "SUCCEEDED",
+      totalMs: round(performance.now() - startedAt),
+      initializationMs: round(initialized.initializationMs),
+      environment,
+    };
+  } catch (error) {
+    return {
+      method: "C0_DEFAULT_WORKER",
+      status: "FAILED",
+      totalMs: round(performance.now() - startedAt),
+      error: errorMessage(error),
+      environment,
+    };
+  } finally {
+    await workerClient.close().catch(() => {});
+  }
+}
+
+function runExplicitOffscreenWorkerTrial(video, frameSourceMethod) {
+  const workerClient = new DiagnosticWorkerClient();
+  return runPoseFrames(video, {
+    method: "C1_EXPLICIT_OFFSCREEN_WORKER",
+    executionThread: "WORKER",
+    canvasMode: "EXPLICIT_OFFSCREEN",
+    frameSourceMethod,
+    label: "C1 明示OffscreenCanvas Worker",
+    shortLabel: "C1",
+    initialize: () =>
+      workerClient.call("initialize", {
+        canvasMode: "EXPLICIT_OFFSCREEN",
+      }),
+    async detect(bitmap, timestampMs) {
+      try {
+        return await workerClient.call(
+          "detect",
+          { bitmap, timestampMs },
+          [bitmap],
+        );
+      } catch (error) {
+        try {
+          bitmap.close();
+        } catch {
+          // The bitmap was already detached if postMessage succeeded.
+        }
+        throw error;
+      }
+    },
+    close: () => workerClient.close(),
+  });
+}
+
+function runMainThreadCanvasTrial(video, frameSourceMethod) {
+  let mainThreadLandmarker = null;
+  return runPoseFrames(video, {
+    method: "C2_EXPLICIT_HTML_CANVAS_MAIN",
+    executionThread: "MAIN",
+    canvasMode: "EXPLICIT_HTML_CANVAS",
+    frameSourceMethod,
+    label: "C2 明示HTMLCanvas メインスレッド",
+    shortLabel: "C2",
+    async initialize() {
+      const startedAt = performance.now();
+      const [vision, modelResponse] = await Promise.all([
+        // The main-thread loader injects a classic script element, so it must
+        // use the non-module Emscripten loader. Workers use the module loader.
+        FilesetResolver.forVisionTasks("/mediapipe/wasm"),
+        fetch("/mediapipe/model"),
+      ]);
+      if (!modelResponse.ok) {
+        throw new Error(`Pose model download failed: ${modelResponse.status}`);
+      }
+      const modelAssetBuffer = new Uint8Array(await modelResponse.arrayBuffer());
+      const canvas = document.createElement("canvas");
+      mainThreadLandmarker = await PoseLandmarker.createFromOptions(vision, {
+        baseOptions: { modelAssetBuffer, delegate: "CPU" },
+        canvas,
+        runningMode: "VIDEO",
+        numPoses: 1,
+        minPoseDetectionConfidence: 0.5,
+        minPosePresenceConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+        outputSegmentationMasks: false,
+      });
+      return { initializationMs: performance.now() - startedAt };
+    },
+    async detect(bitmap, timestampMs) {
+      if (!mainThreadLandmarker) {
+        bitmap.close();
+        throw new Error("Main-thread Pose Landmarker is not initialized.");
+      }
+      const startedAt = performance.now();
+      try {
+        const result = mainThreadLandmarker.detectForVideo(bitmap, timestampMs);
+        const poseCount = result.landmarks.length;
+        result.close?.();
+        return {
+          inferenceMs: performance.now() - startedAt,
+          poseCount,
+        };
+      } finally {
+        bitmap.close();
+      }
+    },
+    async close() {
+      mainThreadLandmarker?.close();
+      mainThreadLandmarker = null;
+    },
+  });
 }
 
 function formatMs(value) {
@@ -565,21 +699,21 @@ function timingDiagnosis(seek, inference) {
   return "シークと推論が同程度";
 }
 
-function adoptionCandidate(methods, pose) {
-  if (pose?.status === "SUCCEEDED") {
-    if (methods.a1HiddenPlay.status === "SUCCEEDED") return "A1_HIDDEN_PLAY";
-    return "A2_RENDERED_PLAY";
+function poseImplementationCandidate(poseMethods) {
+  if (poseMethods.c1ExplicitOffscreenWorker?.status === "SUCCEEDED") {
+    return "C1_EXPLICIT_OFFSCREEN_WORKER";
   }
-  if (methods.webCodecs.status === "SUCCEEDED") return "B_WEBCODECS";
+  if (poseMethods.c2MainThreadCanvas?.status === "SUCCEEDED") {
+    return "C2_EXPLICIT_HTML_CANVAS_MAIN";
+  }
   return "NONE";
 }
 
-function adoptionLabel(candidate) {
+function poseCandidateLabel(candidate) {
   const labels = {
-    A1_HIDDEN_PLAY: "A1: 非表示video + play priming",
-    A2_RENDERED_PLAY: "A2: 1px video + play priming",
-    B_WEBCODECS: "B: WebCodecs（Aは失敗）",
-    NONE: "採用候補なし",
+    C1_EXPLICIT_OFFSCREEN_WORKER: "C1: Worker + 明示OffscreenCanvas",
+    C2_EXPLICIT_HTML_CANVAS_MAIN: "C2: メインスレッド + HTMLCanvas",
+    NONE: "動作候補なし",
   };
   return labels[candidate];
 }
@@ -595,9 +729,19 @@ function metricCard(label, total, perFrame) {
 }
 
 function renderResult(result) {
-  const { methods, poseMeasurement: pose } = result;
+  const { methods, poseMethods } = result;
+  const c0 = poseMethods.c0DefaultWorker;
+  const c1 = poseMethods.c1ExplicitOffscreenWorker;
+  const c2 = poseMethods.c2MainThreadCanvas;
+  const primaryPose =
+    c1?.status === "SUCCEEDED"
+      ? c1
+      : c2?.status === "SUCCEEDED"
+        ? c2
+        : null;
   summaryElement.innerHTML = [
-    `<article class="metric accent"><h3>製品の採用候補</h3><strong>${escapeHtml(adoptionLabel(result.adoptionCandidate))}</strong><span>実機結果をleaderが確認するまで製品には適用しません</span></article>`,
+    `<article class="metric accent"><h3>Pose実行方式の候補</h3><strong>${escapeHtml(poseCandidateLabel(result.poseImplementationCandidate))}</strong><span>実機結果をleaderが確認するまで製品には適用しません</span></article>`,
+    `<article class="metric accent"><h3>フレーム取得方式</h3><strong>採用判断は保留</strong><span>C1/C2の入力には ${escapeHtml(result.poseInputFrameSourceMethod ?? "利用可能なA方式なし")} を使用</span></article>`,
     methodCard("A1 非表示 + play", methods.a1HiddenPlay, (method) =>
       `最初のフレーム ${formatMs(method.events.firstVideoFrameMs)}`,
     ),
@@ -607,17 +751,28 @@ function renderResult(result) {
     methodCard("B WebCodecs", methods.webCodecs, (method) =>
       `${method.codec} / ${method.decodedFrames}フレームdecode`,
     ),
+    methodCard("C0 既定Worker", c0, (method) =>
+      `MediaPipe自動判定=${method.environment.mediaPipeSupportsOffscreenCanvas}`,
+    ),
+    c1
+      ? methodCard("C1 OffscreenCanvas Worker", c1, (method) =>
+          `${method.processedFrames}/${method.requestedFrames}フレーム完走`,
+        )
+      : "",
+    c2
+      ? methodCard("C2 HTMLCanvas Main", c2, (method) =>
+          `${method.processedFrames}/${method.requestedFrames}完走 / 最大block ${formatMs(method.maxMainThreadBlockMs)}`,
+        )
+      : "",
   ].join("");
-  if (pose?.status === "SUCCEEDED") {
-    const timing = pose.timing;
+  if (primaryPose) {
+    const timing = primaryPose.timing;
     summaryElement.innerHTML += [
-      `<article class="metric accent"><h3>フォーム計測の律速</h3><strong>${escapeHtml(timingDiagnosis(timing.seek, timing.inference))}</strong><span>${pose.processedFrames}/${pose.requestedFrames}フレーム完走</span></article>`,
+      `<article class="metric accent"><h3>採用候補の律速</h3><strong>${escapeHtml(timingDiagnosis(timing.seek, timing.inference))}</strong><span>${primaryPose.processedFrames}/${primaryPose.requestedFrames}フレーム完走</span></article>`,
       metricCard("シーク", timing.seek.totalMs, timing.seek.meanMs),
-      metricCard("推論（Worker内）", timing.inference.totalMs, timing.inference.meanMs),
+      metricCard("推論", timing.inference.totalMs, timing.inference.meanMs),
       metricCard("画像化", timing.bitmap.totalMs, timing.bitmap.meanMs),
     ].join("");
-  } else if (pose) {
-    summaryElement.innerHTML += methodCard("フォーム計測", pose, () => "完走");
   }
 
   const primingRows = [
@@ -642,15 +797,41 @@ function renderResult(result) {
         .join("")}</tbody>
     </table>`;
 
-  if (pose?.status === "SUCCEEDED") {
+  const poseRows = [
+    ["C0 既定Worker", c0],
+    ["C1 明示OffscreenCanvas Worker", c1],
+    ["C2 明示HTMLCanvas Main", c2],
+  ].filter(([, method]) => method);
+  detailHtml += `
+    <h2>Pose実行方式の結果</h2>
+    <table>
+      <thead><tr><th>方式</th><th>成否</th><th>所要時間</th><th>詳細</th></tr></thead>
+      <tbody>${poseRows
+        .map(([label, method]) => {
+          let detail = method.error;
+          if (method.status === "SUCCEEDED") {
+            detail = label.startsWith("C0")
+              ? `default init ${formatMs(method.initializationMs)}`
+              : `${method.processedFrames}/${method.requestedFrames} frames${method.executionThread === "MAIN" ? `, max block ${formatMs(method.maxMainThreadBlockMs)}` : ""}`;
+          }
+          return `<tr><th>${escapeHtml(label)}</th><td>${method.status === "SUCCEEDED" ? "成功" : "失敗"}</td><td>${formatMs(method.totalMs)}</td><td class="wrap">${escapeHtml(detail)}</td></tr>`;
+        })
+        .join("")}</tbody>
+    </table>`;
+
+  for (const [label, pose] of [
+    ["C1 Worker", c1],
+    ["C2 Main", c2],
+  ]) {
+    if (pose?.status !== "SUCCEEDED") continue;
     const timingRows = [
       ["シーク", pose.timing.seek],
       ["画像化", pose.timing.bitmap],
-      ["推論（Worker内）", pose.timing.inference],
-      ["Worker往復", pose.timing.workerRoundTrip],
+      ["推論", pose.timing.inference],
+      ["実行往復", pose.timing.executionRoundTrip],
     ];
     detailHtml += `
-      <h2>フォーム計測の時間内訳</h2>
+      <h2>${escapeHtml(label)}の時間内訳</h2>
       <table>
         <thead><tr><th>区間</th><th>合計</th><th>平均/回</th><th>p95</th><th>最大</th></tr></thead>
         <tbody>${timingRows
@@ -660,6 +841,7 @@ function renderResult(result) {
           .join("")}</tbody>
       </table>`;
   }
+  const workerEnvironment = c0.environment;
   const video =
     methods.a1HiddenPlay.video?.durationSeconds !== null
       ? methods.a1HiddenPlay.video
@@ -669,6 +851,10 @@ function renderResult(result) {
       <div><dt>動画</dt><dd>${escapeHtml(result.file.name)} / ${(result.file.sizeBytes / 1024 / 1024).toFixed(1)}MB${video?.durationSeconds ? ` / ${video.durationSeconds.toFixed(2)}秒` : ""}${video?.width ? ` / ${video.width}x${video.height}` : ""}</dd></div>
       <div><dt>端末</dt><dd>${escapeHtml(result.device.userAgent)}</dd></div>
       <div><dt>WebCodecs VideoDecoder</dt><dd>${result.device.webCodecsVideoDecoder ? "利用可能" : "利用不可"}</dd></div>
+      <div><dt>Worker UA</dt><dd>${escapeHtml(workerEnvironment?.userAgent ?? "取得失敗")}</dd></div>
+      <div><dt>Worker document</dt><dd>${workerEnvironment?.documentAvailable ? "あり" : "なし"}</dd></div>
+      <div><dt>Worker OffscreenCanvas / WebGL2</dt><dd>${workerEnvironment?.offscreenCanvasAvailable ? "あり" : "なし"} / ${workerEnvironment?.offscreenCanvasWebgl2 ? "取得成功" : "取得失敗"}</dd></div>
+      <div><dt>MediaPipe自動判定</dt><dd>${workerEnvironment?.mediaPipeSupportsOffscreenCanvas ? "対応扱い" : "非対応扱い"}（WebKit=${String(workerEnvironment?.mediaPipeIsWebKit)}, Safari major=${workerEnvironment?.mediaPipeSafariMajorVersion ?? "取得なし"}）</dd></div>
     </dl>`;
   detailsElement.innerHTML = detailHtml;
   jsonElement.textContent = JSON.stringify(result, null, 2);
@@ -717,12 +903,23 @@ async function runDiagnostic(file, primingTrials) {
         : a2RenderedPlay.status === "SUCCEEDED"
           ? primingTrials[1]
           : null;
-    const poseMeasurement = selectedTrial
-      ? await runPoseMeasurement(selectedTrial.video)
+    const c0DefaultWorker = await runDefaultWorkerTrial();
+    const c1ExplicitOffscreenWorker = selectedTrial
+      ? await runExplicitOffscreenWorkerTrial(
+          selectedTrial.video,
+          selectedTrial.mode,
+        )
       : null;
-    const candidate = adoptionCandidate(methods, poseMeasurement);
+    const c2MainThreadCanvas = selectedTrial
+      ? await runMainThreadCanvasTrial(selectedTrial.video, selectedTrial.mode)
+      : null;
+    const poseMethods = {
+      c0DefaultWorker,
+      c1ExplicitOffscreenWorker,
+      c2MainThreadCanvas,
+    };
     const result = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       status: "COMPLETED",
       measuredAt,
       totalElapsedMs: round(performance.now() - runStartedAt),
@@ -732,10 +929,12 @@ async function runDiagnostic(file, primingTrials) {
         delegate: "CPU",
         mp4boxVersion: "2.4.1",
       },
-      adoptionCandidate: candidate,
+      frameSourceDecision: "PENDING",
+      poseInputFrameSourceMethod: selectedTrial?.mode ?? null,
+      poseImplementationCandidate: poseImplementationCandidate(poseMethods),
       file: { name: file.name, sizeBytes: file.size, type: file.type || null },
       methods,
-      poseMeasurement,
+      poseMethods,
       device: deviceInformation(),
     };
     renderResult(result);
@@ -743,7 +942,7 @@ async function runDiagnostic(file, primingTrials) {
     statusElement.textContent = "比較完了。結果全体をスクリーンショットし、JSON全文も共有してください。";
   } catch (error) {
     const failure = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       status: "FAILED",
       measuredAt,
       error: errorMessage(error),

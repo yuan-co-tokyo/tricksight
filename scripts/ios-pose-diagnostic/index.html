@@ -48,7 +48,7 @@
   <body>
     <main>
       <h1>iPhone骨格計測診断</h1>
-      <p class="notice">1回の動画選択で、A1（非表示video + play）、A2（1px video + play）、B（WebCodecs）の3方式を個別に検証します。A方式が成功した場合は、製品と同じfullモデル・CPU・10fpsのフォーム計測まで実行します。動画はこの端末内だけで処理され、サーバには送信されません。</p>
+      <p class="notice">1回の動画選択で、A1（非表示video + play）、A2（1px video + play）、B（WebCodecs）に加え、Pose初期化のC0（既定Worker）、C1（明示OffscreenCanvas Worker）、C2（明示HTMLCanvas メインスレッド）を順番に検証します。C1とC2は製品と同じfullモデル・CPU・10fpsで全フレームを処理するため、完了までブラウザを前面に置いてください。動画はこの端末内だけで処理され、サーバには送信されません。</p>
       <label>
         動画を選ぶと自動で計測開始
         <input id="video-file" type="file" accept="video/mp4,video/quicktime,video/*" />
