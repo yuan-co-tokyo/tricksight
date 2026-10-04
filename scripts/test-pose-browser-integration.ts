@@ -7,7 +7,10 @@ import ts from "typescript";
 
 import { POSE_LANDMARKER_CONFIG } from "../lib/pose/config";
 
-const VIDEO_PATH = resolve("eval/input/kickflip_10.mp4");
+const VIDEO_PATH = resolve(process.env.POSE_INTEGRATION_VIDEO ?? "eval/input/kickflip_10.mp4");
+const EXPECTED_FRAMES = process.env.POSE_INTEGRATION_EXPECTED_FRAMES
+  ? Number(process.env.POSE_INTEGRATION_EXPECTED_FRAMES)
+  : undefined;
 const MODEL_PATH = resolve(
   `eval/mediapipe-cache/${POSE_LANDMARKER_CONFIG.model.name}.task`,
 );
@@ -45,8 +48,9 @@ window.runProductPoseIntegration = async ({ videoUrl }) => {
   if (!response.ok) throw new Error(\`Video fetch failed: \${response.status}\`);
   const progress = [];
   const playCallsBeforeStart = playCallCount;
-  const task = startPoseVideoAnalysis(await response.blob(), {
-    timeoutMs: 60_000,
+  const video = await response.blob();
+  const startedAt = performance.now();
+  const task = startPoseVideoAnalysis(video, {
     assetUrls: {
       modelUrl: "/mediapipe/model",
       wasmLoaderMode: "MODULE",
@@ -54,7 +58,8 @@ window.runProductPoseIntegration = async ({ videoUrl }) => {
     onProgress: (event) => progress.push(event),
   });
   const synchronousPlayCalls = playCallCount - playCallsBeforeStart;
-  return { result: await task.result, progress, synchronousPlayCalls };
+  const result = await task.result;
+  return { result, elapsedMs: performance.now() - startedAt, progress, synchronousPlayCalls };
 };
 `;
 
@@ -236,6 +241,7 @@ async function startIntegrationServer() {
 }
 
 type IntegrationOutput = {
+  elapsedMs: number;
   result: {
     status: string;
     metrics: Record<string, number | null> | null;
@@ -282,6 +288,14 @@ async function verifyBrowser(
           `${name}/${extension}: expected one synchronous play(), received ${output.synchronousPlayCalls}`,
         );
       }
+      if (
+        EXPECTED_FRAMES !== undefined &&
+        (output.result.quality?.frameCount !== EXPECTED_FRAMES ||
+          output.progress.at(-1)?.processedFrames !== EXPECTED_FRAMES ||
+          output.progress.at(-1)?.totalFrames !== EXPECTED_FRAMES)
+      ) {
+        throw new Error(`${name}/${extension}: expected ${EXPECTED_FRAMES} completed frames.`);
+      }
       const metrics = output.result.metrics;
       if (
         !metrics ||
@@ -306,6 +320,12 @@ async function verifyBrowser(
           browser: name,
           browserVersion: browser.version(),
           format: extension.toUpperCase(),
+          fixture: basename(VIDEO_PATH),
+          // MOV here is the same MP4 bytes served with video/quicktime.
+          // This does not verify a camera-original QuickTime container.
+          fixtureVariant: extension === "mov" ? "MP4_BYTES_QUICKTIME_MIME" : "MP4",
+          elapsedMs: output.elapsedMs,
+          timeoutMs: POSE_LANDMARKER_CONFIG.defaultTimeoutMs,
           frameCount: output.result.quality?.frameCount,
           metrics,
           progressEvents: output.progress.length,
