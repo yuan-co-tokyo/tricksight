@@ -28,7 +28,8 @@
     "pose:sync-assets": "node scripts/sync-pose-assets.mjs",
     "eval:twelvelabs": "node --env-file=.env.local --import tsx scripts/eval-twelvelabs.ts",
     "verify:twelvelabs": "node --env-file=.env.local --import tsx scripts/verify-twelvelabs.ts",
-    "verify:aws": "node --env-file=.env.local --import tsx scripts/verify-aws.ts"
+    "verify:aws": "node --env-file=.env.local --import tsx scripts/verify-aws.ts",
+    "view:pose": "node --import tsx scripts/pose-viewer/server.ts"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock": "^3.1107.0",
