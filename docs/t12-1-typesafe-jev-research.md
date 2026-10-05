@@ -1,10 +1,10 @@
 # T12-1 TypeSafe / Jev 調査と小規模実験案
 
-調査: 2026-10-04〜05。基準: T12-0検収済み `3f878a9`（origin/mainへpush済み）。本タスクは文書のみ。依存追加、製品変更、APIキー取得、評価API呼び出しは行っていない。公開資料の閲覧と既存ローカル診断JSONの読み取りだけを実施した。
+調査: 2026-10-04〜05。基準: T12-0検収済み `3f878a9`（origin/mainへpush済み）。本タスクは文書のみ。依存追加、製品変更、APIキー取得、評価API呼び出しは行っていない。公開資料の閲覧、既存ローカル診断JSONの読み取り、原動画から抽出した前後フレームの目視照合を実施した。
 
 ## 判断案
 
-**数値JSONを入力した分類実験は可能。ただし、再現性改善・スケートの成否判定能力は未確認。既存動画providerの置換は勧めない。** ユーザーがT12-0動画を見て入力要素を選び、leaderと実験条件を承認した後、独立した評価スクリプトで試す案とする。
+**数値JSONを入力した分類実験は可能。ただし、再現性改善・スケートの成否判定能力は未確認。既存動画providerの置換は勧めない。** ユーザーの動画確認を受けた推定頂点中心の案から個別要素を選び、leaderと実験条件を承認した後、独立した評価スクリプトで試す案とする。
 
 Jevはテキスト／構造化データを指定された選択肢・尺度に評価するモデル。画像・動画は扱わない。板の接地や回転を観測していない骨格集約値から、成否を直接確認したことにはできない。数値算出は既存コードで行い、Jevには意味・単位を添えた少数の集約値を渡す。根拠は以下で「公開仕様」「提供元の実験」「ローカル観察」「提案」に分ける。
 
@@ -72,93 +72,146 @@ Enterprise向けZDRは案内されているが、通常アカウントの既定�
 
 HTTP直結なら依存追加なしでwireを固定できる。TanStackを選ぶ理由は統一evaluate契約、公式SDKを選ぶ理由は専用型とretryであり、現時点でどちらも必須ではない。最初の小実験はHTTP直結案とし、通信・受信検証を含む実装方法は次タスクで承認する。APIキーはサーバ／ローカルNodeだけで扱う。
 
-## 5. 指標候補（未選定）
+## 5. 推定頂点を中心とする指標・JSON第一案（追記3反映）
 
-計算根拠は既存[metrics.ts](../lib/pose/metrics.ts)、製品への4値マッピングは[measurement.ts](../lib/pose/measurement.ts)。T12-0は可視化しただけで採点基準を検証していない。
+2026-10-05、依頼者が6動画を見た後の意向を受け、第一案を**推定頂点時の情報**へ変更した。個別指標、1点／窓集約、他局面の追加は未決定。従来の着地窓中央値と全動画4集約値は補助候補に移す。
 
-表の範囲は数学的な受入範囲で、成功の推奨範囲ではない。`null`は欠損。Qpは有限値の線形補間分位数、Hは全derived frameの肩中心〜腰中心2D距離の中央値。Lは既存の「推定着地」から `min(1500,max(500,動画長ms×0.15))` msの区間。これは板の接地検出ではなく、腰yが頂点とp80基準の中間へ戻った最初の時刻である。
+### 推定頂点の定義
 
-| JSONキー案 | 式・単位・範囲 | 用途仮説と根拠の強さ |
+根拠は[metrics.ts](../lib/pose/metrics.ts)のderiveFrame / detectMovementWindowと[ビューアseries](../scripts/pose-viewer/series.mjs)。肩11/12・腰23/24がvisibility / presenceとも0.5以上、胴長・腰幅が正のframeをderived候補にする。動画長の5〜95%内に候補が5個以上あればその範囲、なければ全derived候補から、腰中心 `hipY=(y23+y24)/2` が最小のサンプルを選ぶ。同値なら先に現れるサンプル。全derivedが5個未満なら頂点はnull。
+
+これは**取得できた腰の画像上の最高位置**の代理時刻。身体重心、足、板の頂点、接地時刻の実測ではない。下半身が欠損しても腰から頂点は出る。追従カメラ、姿勢変化、誤推定、真の頂点付近の全pose欠損で違う局面を選び得る。
+
+### 原動画6本の目視照合
+
+2026-10-05に既存JSONの時刻を読み、原MP4をChromiumでデコードして前後フレームを目視した。全体20点の一覧と頂点周辺15点の一覧を `eval/output/pose-viewer/<sample-id>-apex-overview.png` / `-apex-detail.png` に保存（git管理外）。詳細の刻みはkickflip_10が0.1秒、kickflip_4/5が0.2秒、通常速度3本が0.05秒。ラベルはseek指定時刻で、原動画の厳密なPTS測定ではない。
+
+「実際の頂点」は腰周辺の上昇から下降への切替を目視した概略区間とする。頭頂や板だけの高さと同一視せず、見切れて同定できない場合は不明とする。下記は1人の目視観察であり、校正されたground truthやフレーム精度の保証ではない。時刻はスローを含む動画の再生秒である。
+
+| 動画 | 推定頂点 | 目視照合とずれ |
+| --- | ---: | --- |
+| kickflip_10 | 5.10秒 | 腰付近が高くなる区間はおよそ4.8〜5.1秒。概ね頂点付近で、目視区間に対する差0〜+0.3秒。足や板の最高時点とは別 |
+| kickflip_4 | 8.20秒 | 6.8〜7.8秒付近で腰・脚が高く、8.2秒は下降側に見える。高い区間より約0.4〜1.4秒遅い疑い。上体の見切れとカメラ変動があり、腰の真の頂点の一点確定はできない |
+| kickflip_5 | 4.90秒 | まだ踏み切り前で、頂点とは合わない。空中で脚が高いのは概ね6.6〜7.4秒で、そこより1.7〜2.5秒早い。ただしこれは脚の目視比較で、腰が上端に切れるため真の腰頂点との厳密な差は算出不能 |
+| kickflip_8 | 2.30秒 | 腰が高い区間は概ね2.25〜2.35秒。差約±0.05秒の範囲で概ね一致 |
+| ollie_1 | 3.30秒 | 腰が高い区間は概ね3.30〜3.40秒。区間の前半で、差−0.10〜0秒程度 |
+| ollie_4 | 1.70秒 | 腰が高い区間は概ね1.70〜1.80秒。区間の前半で、差−0.10〜0秒程度。ただし膝・足首の計測は欠損 |
+
+kickflip_4は全体gate通過でも頂点妥当性に疑いがある。8.1/8.2/8.3秒の膝平均が111.22/159.80/90.55度と大きく変動し、8.2秒の原画像は膝を曲げているように見える。visibilityが高いことだけで推定関節位置や角度の正確さを保証できない。kickflip_5は5.1〜8.6秒の36サンプルが全pose欠損し、残った4.9秒を頂点としてしまう。両者は10fpsの量子化誤差だけでは説明できない問題である。
+
+### 頂点1サンプルの数値候補
+
+Aを上記頂点frame、Bを全derivedのhipYのp80、Hを全derivedの2D肩中心〜腰中心距離の中央値とする。膝角はworldLandmarksがあれば3Dの股関節−膝−足首角、なければnormalized 3D。左右は身体の解剖学的左右で、画面左右や前足／後足ではない。
+
+| JSONキー（apex.features内） | 式・単位 | 値の範囲 / 欠損 |
 | --- | --- | --- |
-| minimumMeanKneeAngleDeg（既存） | 左右膝角度平均のQ05、deg、0〜180 | 深く曲げた局面の比較。名前はminimumだがstrict minではない。T11-1の探索的差に留まる |
-| kneeExtensionRangeDeg（既存） | 膝平均Q90−Q10、deg、0〜180 | 屈曲・伸展幅の記述。同条件での本人比較候補。成否の因果は未検証 |
-| hipVerticalRangeTorsoUnits（既存） | 腰yの(Q90−Q10)/H、胴長比、0以上 | 腰移動の相対幅。実跳躍高・mではない。カメラ移動にも反応 |
-| landingTrunkTiltDeg（既存） | Lのatan2(肩腰中心のabs dx, abs dy)中央値、deg、0〜90 | 体幹投影の記述。T11-1は当初仮説と逆方向。良否判定軸には推奨しない |
-| **landingKneeAsymmetryDeg** | Lのmedian(abs(左膝角−右膝角))、deg、0〜180 | 左右の曲げ方の違いを記述。片足着地を示す可能性という仮説のみ。非対称が技の正常動作でも起こる |
-| **landingAnkleHeightAsymmetryTorsoUnits** | Lのmedian(abs(y27−y28))/H、胴長比、0以上 | 左右足首の投影高さ差。片足が離れる状態を捉える可能性。ただし板との接触を測っていない |
-| **landingFootSeparationHipWidths** | Lのmedian(2D足首間距離/同frame腰幅)、腰幅比、0以上 | 足の開き方の記述。SIDEで腰幅が小さいと比が大きくなり、成功基準の足幅とは扱えない |
-| landingMeanKneeAngleDeg | Lの膝平均中央値、deg、0〜180 | 終盤の屈曲姿勢の記述。深さだけで衝撃吸収・成功を証明しない |
-| postLandingTrunkTiltRangeDeg | Lの体幹角Q90−Q10、deg、0〜90 | 終盤の姿勢変動。T11-1の逆方向結果と投影の影響から探索限定 |
-| postLandingHipRangeTorsoUnits | Lの腰y(Q90−Q10)/H、胴長比、0以上 | 終盤の上下動。ただし走り去り／カメラ追従と混ざるため探索限定 |
+| leftKneeAngleDeg | Aの左股関節23−膝25−足首27の角、deg | 0〜180またはnull |
+| rightKneeAngleDeg | Aの右股関節24−膝26−足首28の角、deg | 0〜180またはnull |
+| meanKneeAngleDeg | 上記左右の平均、deg | 0〜180、片側欠損ならnull |
+| hipHeightTorsoUnits | (B−A.hipY)/H、胴長比 | 有限実数またはnull。全範囲最小を選ばない場合もあり、負値を仕様で禁止しない |
+| trunkTiltDeg | atan2(abs(肩腰中心dx),abs(肩腰中心dy))、deg | 0〜90またはnull |
+| kneeAsymmetryDeg | abs(左膝角−右膝角)、deg | 0〜180、片側欠損ならnull |
+| ankleHeightAsymmetryTorsoUnits | abs(A.y27−A.y28)/H、胴長比 | 0以上、有限上限なし、またはnull |
+| footSeparationHipWidths | Aの2D足首間距離/Aの2D腰幅、腰幅比 | 0以上、有限上限なし、またはnull |
 
-膝はworldLandmarksがあれば3Dの股関節−膝−足首角、なければnormalized 3D。胴長・腰幅・足首差はnormalized 2Dなので、画面縦横比と投影の影響がある。比の有限な上限は現式から決まらない。未知の外れ値を都合よくclipせず、分母・範囲外・欠損を記録して採否を判断する。
+膝と非対称は空中での脚の引き上げ方、足幅は開き方を記述する候補。良好なフォームの閾値は未検証で、回転中の正常な非対称もある。腰相対高さは実跳躍高やmではない。2D値は画角・縦横比・カメラ移動に影響され、SIDEの小さい腰幅で足幅比は膨らみ得る。体幹を「小さいほど成功」とはしない（T11-1の当初仮説と逆方向の結果）。[T11-1記録](phase0-pose-landmarker-feasibility.md)
 
-全体quality gateはposeCoverageとlowerBodyCoverageの両方≥0.8。下半身は23,24,25,26,27,28,31,32のvisibility / presence≥0.5。coreの11,12,23,24や正の胴長／腰幅が不足すればderived値も落ちる。L内に有効値がないと追加指標はnullになり、全体gate通過だけでは窓内の十分な観測数を保証しない。実験用には指標ごとのvalid count、窓内予定サンプル数、欠損理由も付ける案（まだ未実装）。
+現実装は**左右どちらの膝も下半身8点全て**（23,24,25,26,27,28,31,32）のvisibility / presence≥0.5を要求する。片側だけ見える場合に片側角を救済する変更は今回提案に含めない。core不足、分母不足、頂点なしは対応値をnullとし、0埋めや時間補間で生成しない。範囲は数学的受入範囲であり成功の推奨範囲ではない。
 
-`hipRiseDurationMs` と `p95TrunkAngularSpeedDegPerSecond` は初回候補から外す案。撮影スロー率で時間尺度が変わり、T11-1で角速度はサンプル方法の変更に大きく反応した。現角速度式はderived frameの隣同士を使うので欠損をまたぐこともある。時間正規化と区間検証なしに速度を技量と結び付けない。
+| 動画 | 全体gate | 頂点秒 | 膝L / R / 平均deg | 腰相対高 | 体幹deg | 膝差deg | 足首差/胴長 | 足幅/腰幅 |
+| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| kickflip_10 | 通過 | 5.1 | 97.58 / 95.28 / 96.43 | 0.8735 | 2.42 | 2.30 | 0.0477 | 3.2740 |
+| kickflip_4 | 通過 | 8.2 | 150.13 / 169.47 / 159.80 | 1.6312 | 8.52 | 19.34 | 0.1333 | 2.9995 |
+| kickflip_5 | 不通過 | 4.9 | 135.41 / 146.07 / 140.74 | 0.6603 | 6.76 | 10.65 | 0.0890 | 1.5053 |
+| kickflip_8 | 不通過 | 2.3 | 100.60 / 86.34 / 93.47 | 0.7433 | 14.40 | 14.25 | 0.1809 | 0.7846 |
+| ollie_1 | 通過 | 3.3 | 49.26 / 130.46 / 89.86 | 0.3985 | 1.45 | 81.20 | 0.6396 | 3.9035 |
+| ollie_4 | 不通過 | 1.7 | null / null / null | 0.5542 | 15.74 | null | null | null |
 
-### T12-0の6本と候補3値の照合
+既存JSONからの読み取りで新たなpose推論なし。値が全てあるkickflip_5でも頂点の意味は成立しない。kickflip_8は頂点では値が揃うが冒頭の長い右下肢欠損で全体gate不通過。ollie_4は頂点で左膝25／左足首27不足、腰と体幹のみ取得できる。**第一案は3本ともJevへ送らずローカルUNASSESSABLE**を維持する。将来頂点局所gateを試すなら別条件にし、kickflip_5のような頂点選択の誤りを局所可視率だけで救済しない。
 
-既存 `eval/output/pose-viewer/*-*.json` のcalculatedを読み取った値。今回新たにpose推論はしていない。値は推定着地窓の中央値で、ビューアの現在frame値とは異なる。
+### 1点と近傍窓の代替案
 
-| 動画 | 自己申告 / gate | 膝左右差deg | 足首高さ差/胴長 | 足幅/腰幅 |
-| --- | --- | ---: | ---: | ---: |
-| kickflip_10 | 失敗 / 通過 | 18.26 | 0.041 | 2.053 |
-| kickflip_4 | 成功 / 通過 | 20.38 | 0.096 | 2.278 |
-| kickflip_5 | 成功 / 不通過 | 12.65 | 0.121 | 1.779 |
-| kickflip_8 | 失敗 / 不通過 | 9.20 | 0.108 | 2.148 |
-| ollie_1 | 成功 / 通過 | 8.11 | 0.077 | 2.650 |
-| ollie_4 | 失敗 / 不通過 | null | null | null |
+10fpsの隣接サンプルは0.1秒。直前サンプル保持は最大約0.1秒ずれる。真の頂点の最寄りサンプルなら理想的には±0.05秒だが、現検出器は最寄り時刻を保証せず、欠損・推定誤差によるずれは0.1秒を超える。
 
-不通過3本の値は診断限定で製品結果として利用しない。kickflip_5は5.1〜8.6秒にposeが全欠損し、見えている脚から数値を補えるわけではない。kickflip_8は冒頭の右膝／足首、ollie_4は左膝／足首の信頼度が落ちる。ollie_4の推定着地は1.9秒で、窓内の下半身値が得られず3指標ともnullになる。これらの目視根拠は[T12-0記録](t12-0-pose-viewer.md)を参照。
+| 方法 | 得失・欠損条件案 |
+| --- | --- |
+| 頂点Aの1点（JSON第一案） | 同じ瞬間の各部位を比較できる。単発ノイズ・欠損・頂点選択誤りに弱い |
+| A±0.1秒の3点中央値 | 単発外れ値を抑える。全3点が有効な指標だけ採用する案。欠損を遠いframeで補わず、有効数/予定数を添える。中央値同士は同じ実姿勢を表すとは限らない |
+| A±0.2秒の5点中央値 | より平滑化するが通常速度では上昇・下降が混ざりやすい。スローと同じ物理時間幅ではない。初回の主案にはしない |
 
-成功kickflip_4の膝差は失敗kickflip_10より大きい。足幅も成功ollie_1で最大であり、この選定6本から「非対称／広いほど失敗」という閾値は作れない。撮影方向・速度が異なり、独立した妥当性検証でもない。T11-1も17本中10fps gate通過11本、サンプル方式を変えても通るのは9本、kickflipの通過成功例は1本だけだった。[T11-1記録](phase0-pose-landmarker-feasibility.md)
+実例: kickflip_4の±0.1秒の膝平均中央値は111.22度（単一点159.80度）、kickflip_10は89.40度（96.43度）。kickflip_8は117.89→93.47→71.66度で、変化そのものを平滑化する面もある。ollie_4は3点とも膝がnullで中央値でも救済不能。kickflip_5は3点とも有効だが誤った局面のままで、中央値は頂点検出を修正しない。膝差の窓中央値と左右膝中央値の差、足幅比の中央値と分子分母の中央値比は別なので、各frameで特徴値を算出してからその値の中央値を取る。
 
-### JSON構造案
+推奨は1点と±0.1秒の3点を**ローカルで比較してから**主条件を一つ固定すること。両方Jevに試す場合は別の入力条件として費用・比較数を増やす。欠損点が多い側だけ都合よく窓幅を広げない。
 
-以下は**架空値の構造例**。採用フィールドや良否の閾値を決めたものではない。追加3値を選ぶ場合の形を示す。requestのstateに入れる部分であり、API呼び出しコードではない。
+### JSON第一案
+
+以下は架空値の構造例。単一点案でありAPI呼び出しコードではない。頂点時刻は動画再生ms、品質率は0〜1、countは0以上の整数。選択時刻とmodel/run versionはローカルにも残す。
 
 ```json
 {
-  "featureSchemaVersion": "proposal-1",
+  "featureSchemaVersion": "apex-proposal-1",
   "trick": "KICKFLIP",
   "stance": "REGULAR",
-  "cameraAngle": "SIDE",
+  "cameraAngle": "FRONT",
   "recordingSpeed": "SLOW_MOTION",
   "measurement": {"sampleFps": 10, "angleSource": "world3d", "distanceSource": "normalized2d"},
-  "quality": {"poseCoverage": 0.95, "lowerBodyCoverage": 0.90, "status": "ASSESSABLE"},
-  "landingWindow": {"kind": "hip_half_return_proxy", "validLowerBodyCount": 8, "scheduledSampleCount": 10},
-  "features": {
-    "landingKneeAsymmetryDeg": {"value": 18.2, "unit": "deg", "missingReason": null},
-    "landingAnkleHeightAsymmetryTorsoUnits": {"value": 0.08, "unit": "torso_ratio", "missingReason": null},
-    "landingFootSeparationHipWidths": {"value": 2.1, "unit": "hip_width_ratio", "missingReason": null}
+  "quality": {"poseCoverage": 1, "lowerBodyCoverage": 1, "status": "ASSESSABLE"},
+  "apex": {
+    "method": "minimum_observed_hip_y_middle_5_95",
+    "timestampMs": 5100,
+    "selectionScope": "MIDDLE_5_95_PERCENT",
+    "aggregation": "SINGLE_SAMPLE",
+    "candidateCount": 80,
+    "window": {"beforeMs": 0, "afterMs": 0, "scheduledCount": 1},
+    "features": {
+      "leftKneeAngleDeg": {"value": 97.58, "unit": "deg", "validCount": 1, "missingReason": null},
+      "rightKneeAngleDeg": {"value": 95.28, "unit": "deg", "validCount": 1, "missingReason": null},
+      "meanKneeAngleDeg": {"value": 96.43, "unit": "deg", "validCount": 1, "missingReason": null},
+      "hipHeightTorsoUnits": {"value": 0.8735, "unit": "torso_ratio", "validCount": 1, "missingReason": null},
+      "trunkTiltDeg": {"value": 2.42, "unit": "deg", "validCount": 1, "missingReason": null},
+      "kneeAsymmetryDeg": {"value": 2.30, "unit": "deg", "validCount": 1, "missingReason": null},
+      "ankleHeightAsymmetryTorsoUnits": {"value": 0.0477, "unit": "torso_ratio", "validCount": 1, "missingReason": null},
+      "footSeparationHipWidths": {"value": 3.2740, "unit": "hip_width_ratio", "validCount": 1, "missingReason": null}
+    }
   }
 }
 ```
 
-coverageは0〜1、countは0以上の整数、valid≤scheduled、enumは既知値またはUNKNOWN、特徴値は表の範囲内またはnull。nullにはNO_VALID_SAMPLES等の理由を付け、0で埋めない。送信小数桁は実験開始前に固定（例: deg小数2桁・比小数4桁）、元精度もローカルに保存する。角度sourceが混在する場合は単一world3dと偽らずMIXEDとして記録する。
+selectionScopeはMIDDLE_5_95_PERCENT / ALL_VALID_FALLBACK / NONE。NONEならtimestampMs=null、全特徴value=null、missingReason=NO_APEX。部位不足はLOWER_BODY_NOT_VISIBLE、core不足はCORE_NOT_VISIBLE、分母不足はINVALID_SCALE、窓有効点不足はINSUFFICIENT_WINDOW_SAMPLESなどの機械的理由を使う案。単一点のvalidCountは0/1、3点案なら0〜3。angleSourceはWORLD_3D等へenumを統一して実装時に固定し、混在ならMIXED、未知ならUNKNOWNとする。小数はdeg2桁・比4桁案、元精度はローカルに保持する。
+
+品質不通過や頂点なしは主計画では非送信。診断目的の欠損送信を別承認する場合のみ、上の構造でnullと理由を送り、欠損を低い技量として扱わない説明を添える。頂点が数値的に存在するだけの場合、目視で正しい頂点と確認したことにしない。人手による頂点修正を使うなら自動結果と別条件にする。
+
+### 他局面・全体集約は補助候補
+
+| 補助候補 | 値と価値 | 限界・採否 |
+| --- | --- | --- |
+| 踏み切り前の最大屈曲 | 頂点より前の準備区間にある膝平均の最小値と時刻、左右角。頂点との差で伸展の過程を記述できる | 準備区間の定義が必要。単に動画冒頭〜頂点を走査すると無関係な屈曲も拾う。現全体p05はこの値の代用にならない |
+| 推定着地とその後の窓 | 左右膝、足首高さ差、足幅、体幹の中央値。頂点だけに欠ける着地側の情報を補う | 現着地は腰が半分戻る代理時刻。板接地ではなく、窓もスローに依存。採否は依頼者判断 |
+| 既存全体4集約値 | 膝平均p05、膝p90−p10、腰上下p90−p10/胴長、推定着地体幹中央値 | 頂点とは別の要約。腰相対高さとも異なる。重複や無関係な前後動作が入るため、初回から全部入れない |
+
+体幹角速度と腰上昇時間はスロー率・欠損・サンプル方法に敏感なので引き続き初回から除く案。追加局面や窓幅を広げれば頂点の誤検出が自動的に直るわけではない。製品の4値マッピングは[measurement.ts](../lib/pose/measurement.ts)のまま変更しない。
 
 ## 6. 17本での小規模実験計画（承認前・未実施）
 
 ### 固定条件と漏洩防止
 
-1. ユーザーの動画確認後、入力指標、意味説明、null規則、採用gate、質問・選択肢順を固定。既存4値を含めるかも明示的に選ぶ。17本を見て成功閾値を後付けしない。
+1. 推定頂点中心で入力指標、1点／3点窓、頂点妥当性の扱い、意味説明、null規則、採用gate、質問・選択肢順を固定。既存4値や他局面を含めるかも明示的に選ぶ。17本を見て成功閾値を後付けしない。
 2. 既存manifestの17本（LANDED 7 / BAILED 10）を評価台帳とする。自己申告は比較基準であり、映像の第三者正解ラベルではない。ファイル名、sample ID、自己申告、メモ、Nova結果、ユーザー名、動画URI、生33点をstateから除く。対応IDはローカル台帳だけに置く。
 3. 10fpsの既存計算結果を凍結し、データhash、設定／コードversion、JSON serialization、質問文、model `jev-1.13.0` を保存。計測の揺れとJevの揺れを分ける。異なる実行時刻・random uidをstateに追加しない。
 4. 初回は成否のchoice（LANDED / BAILED / UNCLEAR）1問を候補とする。生の骨格数値に板の接地・回転完遂の直接観測がない旨を説明し、証拠不足ならUNCLEARを許す。confidenceを0〜100点の技量scoreへ転用しない。
 
 ### 対象、反復、比較
 
-- 全17本を台帳に残す。既存gate通過11本が主試験、6本はコードでUNASSESSABLEにしてAPIへ送らない。追加フィールドの窓内要件でさらに減る場合は、その分母・理由を明示する。通過数を増やすためにgateは緩めない。
+- 全17本を台帳に残す。既存gate通過11本を主試験の候補上限とする（頂点中心の適格数は未確定）。全体gate不通過の6本はコードでUNASSESSABLEにしてAPIへ送らない。頂点の誤検出や局所欠損を同じ事前基準で全17本チェックし、さらに減る場合は分母・理由を明示する。kickflip_4の疑義は検査対象であり、自己申告との一致を見て除外しない。通過数を増やすためにgateは緩めない。
 - 各対象について**同一request bodyを5回**送る（11×5=55 request上限）。初めの2件をsmoke確認とし、その実行を5回に含める。2つの時間帯に3回＋2回で分け、model実値と応答を保存。client cacheは使わず、提供元の内部cacheは未知として記録する。
 - 別の頑健性試験としてchoice順序を逆にしたrequestを各2回（11×2=22）。これは同一入力反復と混ぜない。総計77 request上限。4値のみとのablation等を加えるなら、別条件・追加費用として再設計する。
 - 全17本への呼び出しは主計画に含めない。品質不足を含む診断試験を別途承認する場合の予算上限例だけを119 request（17×7）として下表に示す。
 
-**精度:** 各反復のconfusion matrix、LANDED / BAILED別recall、balanced accuracy、UNCLEAR率を出す。棄却込みの正答数/17と、自動判断できた対象の正答数/判断数を併記する。gate由来棄却とJev由来棄却を分離する。全体majority baselineはBAILED固定10/17で、共通対象のbaselineはその11本に合わせて再計算する。
+**精度:** 各反復のconfusion matrix、LANDED / BAILED別recall、balanced accuracy、UNCLEAR率を出す。棄却込みの正答数/17と、自動判断できた対象の正答数/判断数を併記する。gate由来棄却とJev由来棄却を分離する。全体majority baselineはBAILED固定10/17で、共通対象のbaselineは確定した共通対象（最大11本）に合わせて再計算する。
 
 **安定性:** 全5回同一ラベルだった動画数/対象数、初回からの変更数/(対象数×4)、動画ごとの最頻一致率、各class確率のmax−min、confidenceのmax−minを出す。JSON完全一致も記録するが、request IDやusage等のmetadataは判断の一致と分ける。option順序試験は対応する選択肢名に戻して比較する。常に同じ誤答なら「安定・不正確」と報告する。
 
-**Nova比較:** 過去の12/17正答・5/17反転と単純な割合比較はしない。既存2回の結果を共通対象11本に絞った対比較、およびJev先頭2回の反転率を併記する。入力情報量が異なる（動画 vs 集約値）こと、17本が探索に使われた少数標本であることを示す。今回はNovaを再呼び出さない。
+**Nova比較:** 過去の12/17正答・5/17反転と単純な割合比較はしない。既存2回の結果を確定した共通対象（最大11本）に絞った対比較、およびJev先頭2回の反転率を併記する。入力情報量が異なる（動画 vs 集約値）こと、17本が探索に使われた少数標本であることを示す。今回はNovaを再呼び出さない。
 
 **判定案:** schema違反／欠損値捏造がないことと、同一入力5回でラベル反転0件を暫定継続条件とする（採用保証ではない）。正答率がbaseline以下、棄却が多すぎる、順序依存が強い場合は、数値入力だけの成否判断を見直す。精度・coverageの許容値は実験前にleaderと固定する。confidence閾値を試す場合は事前指定し、17本で最適化した閾値を検証済みと呼ばない。製品採用には別動画のholdoutが必要。
 
@@ -176,7 +229,7 @@ coverageは0〜1、countは0以上の整数、valid≤scheduled、enumは既知�
 
 ## 7. leader / ユーザーに判断を依頼する項目
 
-1. T12-0の6動画を確認したうえで、既存4値と追加候補から入力要素を選ぶ。3つの非対称／足幅指標は候補であって決定事項ではない。
+1. 推定頂点中心の8特徴から個別要素、1サンプル／近傍中央値、頂点妥当性の扱いを選ぶ。他局面・既存4集約値は補助候補として採否を決める。
 2. 数値だけでの成否分類を探索する目的、品質不足時の棄却、精度・coverageの継続条件を確定する。助言生成や技量採点は今回の試験対象にしない案。
 3. 固定model、同一入力5回＋順序変更2回、主計画最大77成功応答と費用枠を承認する。
 4. 公開資料で不明な通常保存日数・リージョン詳細を実験前に確認する必要があるか判断する。必要なら問い合わせ担当と確認範囲を決める。
