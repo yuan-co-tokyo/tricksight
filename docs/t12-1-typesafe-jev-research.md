@@ -191,6 +191,65 @@ selectionScopeはMIDDLE_5_95_PERCENT / ALL_VALID_FALLBACK / NONE。NONEならtim
 
 体幹角速度と腰上昇時間はスロー率・欠損・サンプル方法に敏感なので引き続き初回から除く案。追加局面や窓幅を広げれば頂点の誤検出が自動的に直るわけではない。製品の4値マッピングは[measurement.ts](../lib/pose/measurement.ts)のまま変更しない。
 
+### 追記4: 頂点時の頭の相対位置（2026-10-05、未実装）
+
+**第一候補は両耳7/8の中点Nを、腰中心Pと両足首27/28の中点Fに対して表す。** 鼻0は顔の向きによって前方へ偏るため、比較用の別候補とし、自動fallbackで耳と混ぜない。番号は[MediaPipe公式PoseLandmark](https://ai.google.dev/edge/api/mediapipe/python/mp/tasks/vision/PoseLandmark)による。耳中点も頭の質量中心ではなく、頭の位置を説明する代表点に過ぎない。
+
+頭−腰、腰−足元、頭−足元の並びを併記すると、頭だけが移動したのか、上体全体が足元からずれたのかを区別しやすい。ただし空中のFは支持基底ではなく**足首中点という参照点**である。板の範囲・接地・荷重分布は分からず、これらから全身重心や支持基底内外を断定しない。身体各部の質量や姿勢を考慮していないため、頭位置をそのまま重心値として扱う妥当性はない。
+
+座標系は既存2D値と合わせたnormalized画像座標、正規化は既存H（全derived frameの胴長中央値）。符号は画面右が+x、画面下が+y。撮影者基準の左右で、スケーターの進行方向・解剖学的左右に自動変換しない。画面縦横で別々に正規化された座標なので物理長さの比ではない。pixel縦横比補正は別version候補とし、既存値と無断で混ぜない。
+
+| apex.headPosition内のキー案 | 算式 | 単位・範囲 |
+| --- | --- | --- |
+| headToHipDxTorsoUnits / headToHipDyTorsoUnits | (N.x−P.x)/H、(N.y−P.y)/H | torso_ratio、有限実数またはnull |
+| headToAnkleMidDxTorsoUnits / headToAnkleMidDyTorsoUnits | (N.x−F.x)/H、(N.y−F.y)/H | 同上 |
+| hipToAnkleMidDxTorsoUnits / hipToAnkleMidDyTorsoUnits | (P.x−F.x)/H、(P.y−F.y)/H | 同上。頭が欠けても参照点が有効なら取得可能 |
+
+冗長な3組を初回から全投入する必要はない。頭−腰と腰−足元を基本候補とし、頭−足元は人に説明しやすい表示／入力候補。算術はコードで行う。耳2点、参照に使う腰／足首2点には有限座標・visibility≥0.5・presenceがあれば≥0.5・x/yがともに[0,1]を要求する。Hが非正ならINVALID_SCALE。耳片側のみや鼻への自動置換は行わず、HEAD_NOT_VISIBLE / HEAD_OUT_OF_FRAME / ANKLES_NOT_VISIBLE / HIP_NOT_VISIBLE等を付けnullにする。頭指標の採用で既存の全体gateを緩めない。
+
+**6本の取得率:** 既存JSON全frameが分母。閾値通過は既存のvisibility/presence判定（未設定は1扱い）を適用し、「画面内」は対象点が全て[0,1]内を追加した。今回のJSONには頭3点のpresenceが全て未収録で、presenceが高いと実測したものではない。新定義では `presenceAvailable=false` を残す。以下は座標の取得可能性であり、点の正しさ・時間方向の精度評価ではない。
+
+| 動画 | 鼻: 閾値のみ / 画面内追加 | 両耳: 閾値のみ / 画面内追加 | 推定頂点で両耳画面内 |
+| --- | --- | --- | --- |
+| kickflip_10 | 89/89 / 89/89 | 89/89 / 89/89 | 可 |
+| kickflip_4 | 111/118 / 100/118 | 111/118 / 97/118 | 可。ただし頂点時刻の疑義あり |
+| kickflip_5 | 63/101 / 50/101 | 63/101 / 45/101 | **不可** |
+| kickflip_8 | 53/53 / 53/53 | 53/53 / 53/53 | 可。全体gateは不通過 |
+| ollie_1 | 67/67 / 67/67 | 67/67 / 67/67 | 可 |
+| ollie_4 | 57/57 / 57/57 | 57/57 / 57/57 | 可。足首参照は不足 |
+
+kickflip_5の推定頂点4.9秒では鼻y=−0.172、耳y=−0.202/−0.197なのにvisibilityは約0.999、0.993/0.997。**高visibilityでも画面外を外挿している**。したがってこの頭位置は欠損とする。5.1〜8.6秒は全pose欠損。kickflip_4も耳中点候補の画面内取得は97/118に下がる。ほか4本の取得率100%も遮蔽位置の推定精度を保証せず、特にREARで顔側の点が高visibilityだから見えているとは断定できない。
+
+| 撮影角度 | 伝えられる意味 / 伝えられない意味 |
+| --- | --- |
+| FRONT | 画面上の左右・上下の頭／腰／足元の並び。前後（カメラ奥行き）の偏りを測れない。進行方向への偏りとは限らない |
+| REAR | 同じく画面内の横ずれ。身体左右との符号対応がFRONTと反転し得る。顔側点の見えにくさが加わる |
+| SIDE | 画面内の前後に近い投影差を観察できるが、身体の向き・カメラ配置次第。左右の奥行き差は見えない。REGULAR/GOOFYだけで符号を前足側へ変換しない |
+| DIAGONAL | 前後と左右が混ざる。screen dx/dyのまま扱い、単一の身体軸のずれに分解しない |
+
+[公式Webガイド](https://developers.google.com/edge/mediapipe/solutions/vision/pose_landmarker/web_js)ではnormalized zは腰中心原点、xと概ね同じ尺度の深度、world座標は腰中心原点のm単位とされる。これは出力座標の仕様であり、この6本の前後ずれが正確という証拠ではない。worldの頭−腰3Dベクトルや頭−足首ベクトルを別候補にできるが、遮蔽・見切れ・体軸変換の検証がなく初回は除く案。normalized zをmとして扱ったり、worldにすれば2Dで見えない軸が検証済みになったと解釈しない。
+
+JSON追加例（架空値、apexの子、前記8特徴と独立した候補）:
+
+```json
+{
+  "headPosition": {
+    "representative": "EAR_MIDPOINT_7_8",
+    "coordinateSpace": "NORMALIZED_IMAGE_X_RIGHT_Y_DOWN",
+    "normalizer": "GLOBAL_MEDIAN_TORSO_2D",
+    "presenceAvailable": false,
+    "headToHipDxTorsoUnits": {"value": 0.12, "unit": "torso_ratio", "missingReason": null},
+    "headToHipDyTorsoUnits": {"value": -1.3, "unit": "torso_ratio", "missingReason": null},
+    "hipToAnkleMidDxTorsoUnits": {"value": null, "unit": "torso_ratio", "missingReason": "ANKLES_NOT_VISIBLE"},
+    "hipToAnkleMidDyTorsoUnits": {"value": null, "unit": "torso_ratio", "missingReason": "ANKLES_NOT_VISIBLE"},
+    "headToAnkleMidDxTorsoUnits": {"value": null, "unit": "torso_ratio", "missingReason": "ANKLES_NOT_VISIBLE"},
+    "headToAnkleMidDyTorsoUnits": {"value": null, "unit": "torso_ratio", "missingReason": "ANKLES_NOT_VISIBLE"}
+  }
+}
+```
+
+±0.1秒中央値案では各frameでこの判定・相対値算出をしてから集約し、validCountを残す。頭を必須にするか任意欠損許容にするかは実験前に依頼者が決め、全17本の適格数を再集計する。6本の目視照合から頂点誤検出問題は残る。ビューアへ頭の値を足す実装、Jev入力確定、API試験は今回行っていない。
+
 ## 6. 17本での小規模実験計画（承認前・未実施）
 
 ### 固定条件と漏洩防止
@@ -229,7 +288,7 @@ selectionScopeはMIDDLE_5_95_PERCENT / ALL_VALID_FALLBACK / NONE。NONEならtim
 
 ## 7. leader / ユーザーに判断を依頼する項目
 
-1. 推定頂点中心の8特徴から個別要素、1サンプル／近傍中央値、頂点妥当性の扱いを選ぶ。他局面・既存4集約値は補助候補として採否を決める。
+1. 推定頂点中心の8特徴と頭の相対位置候補から個別要素、1サンプル／近傍中央値、頂点妥当性の扱いを選ぶ。他局面・既存4集約値は補助候補として採否を決める。
 2. 数値だけでの成否分類を探索する目的、品質不足時の棄却、精度・coverageの継続条件を確定する。助言生成や技量採点は今回の試験対象にしない案。
 3. 固定model、同一入力5回＋順序変更2回、主計画最大77成功応答と費用枠を承認する。
 4. 公開資料で不明な通常保存日数・リージョン詳細を実験前に確認する必要があるか判断する。必要なら問い合わせ担当と確認範囲を決める。
