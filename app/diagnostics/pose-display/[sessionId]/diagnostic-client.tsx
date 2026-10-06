@@ -10,7 +10,7 @@ export default function DiagnosticClient({ playbackUrl }: { playbackUrl: string 
   }, [playbackUrl]);
   const button = "min-h-11 rounded border px-3 py-2 disabled:opacity-40";
   return <div ref={root} className="space-y-4">
-    <p>まず小さいMP4で、①S3から取得、②取得後の別操作で再生・計測開始、③枠と十字の描画を確認します。動画や座標は新しく保存しません。</p>
+    <p>まず小さいMP4で、①S3から取得、②取得後の別操作で再生・計測開始、③骨格の描画を確認します。動画や座標は新しく保存しません。</p>
     <div className="flex flex-wrap gap-2">
       <button data-diagnostic="fetch" className={button}>1. 動画を取得</button>
       <button data-diagnostic="start" className={button} disabled>2. 計測と表示テストを開始</button>
@@ -21,8 +21,10 @@ export default function DiagnosticClient({ playbackUrl }: { playbackUrl: string 
       <video data-diagnostic="video" className="h-full w-full object-contain" controls playsInline muted preload="metadata" />
       <canvas data-diagnostic="overlay" className="pointer-events-none absolute inset-0 h-full w-full" />
     </div>
-    <p>枠と十字は描画の確認用で、骨格ではありません。全画面・PiPは元動画のみです。</p>
+    <p>低信頼度・画面外の点と接続線は省略します。約0.1秒ごとの直前サンプルを表示し、欠損では古い骨格を残しません。全画面・PiPは元動画のみです。</p>
     <p>主要3項目を確認したら元MOV、3回の反復、途中取消、背景移動、回転・全画面、大きい素材の順に試してください。途中で止めても下の診断結果を共有できます。</p>
+    <p data-diagnostic="current" className="break-words">—</p>
+    <p>動きの参考表示です。成功・失敗や成績を表す数値ではありません。全体品質が不足すると数値は—になります。</p>
     <p>取得失敗・期限切れは履歴を再読み込みしてください。背景移動・終了後は手動で再取得します。</p>
     <pre data-diagnostic="report" className="overflow-x-auto whitespace-pre-wrap break-all rounded border p-3">{"{}"}</pre>
     <button data-diagnostic="copy" className={button}>安全な診断JSONをコピー</button>

@@ -297,7 +297,7 @@ function waitForFirstVideoFrame(
   return { promise, cancel: fail };
 }
 
-async function createBrowserFrameSource(videoBlob: Blob, signal: AbortSignal) {
+export async function createBrowserFrameSource(videoBlob: Blob, signal: AbortSignal) {
   const video = document.createElement("video");
   const objectUrl = URL.createObjectURL(videoBlob);
   video.muted = true;

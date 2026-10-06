@@ -7,7 +7,7 @@ const root = 'scripts/pose-display-diagnostic';
 const bucket = process.env.S3_BUCKET_NAME;
 const region = process.env.AWS_REGION;
 const host = bucket && region ? `${bucket}.s3.${region}.amazonaws.com` : '';
-const modules = ['browser-analysis','config','measurement','metrics','pose-landmarker.worker.ts'];
+const modules = ['frame-metrics','browser-analysis','config','measurement','metrics','pose-landmarker.worker.ts','browser-display','display-protocol','display-series','display-drawing','display-worker-core','display-landmarker','pose-display.worker.ts'];
 const wasm = ['vision_wasm_internal.js','vision_wasm_internal.wasm','vision_wasm_module_internal.js','vision_wasm_module_internal.wasm','vision_wasm_nosimd_internal.js','vision_wasm_nosimd_internal.wasm'];
 const files = new Map([
   ['/',[`${root}/index.html`,'text/html']],
@@ -32,9 +32,8 @@ export function createDiagnosticServer({ fixture = false } = {}) {
       if(fixture && req.url==='/app-controller.mjs') {
         res.setHeader('Content-Type','text/javascript');
         const source=await readFile('lib/diagnostics/pose-display-controller.mjs','utf8');
-        res.end(source.replace("'../pose/browser-analysis'","'/pose/browser-analysis'").replace('startPoseVideoAnalysis(blob,{onProgress:',"startPoseVideoAnalysis(blob,{assetUrls:{modelUrl:'/mediapipe/model',wasmLoaderMode:'MODULE'},onProgress:"));return;
+        res.end(source.replace("'../pose/browser-display'","'/pose/browser-display'").replace("task = startPoseDisplay(blob, $('overlay'), {", "task = startPoseDisplay(blob, $('overlay'), { assetUrls: { modelUrl: '/mediapipe/model', wasmLoaderMode: 'MODULE' },"));return;
       }
-      if(fixture && req.url==='/display.worker.mjs') {res.setHeader('Content-Type','text/javascript');res.end(await readFile('lib/diagnostics/display.worker.mjs'));return;}
       if(req.url==='/config') {res.setHeader('Content-Type','application/json');res.end(JSON.stringify({host,fixture}));return;}
       if(compiled.has(req.url)) {res.setHeader('Content-Type','text/javascript');res.end(compiled.get(req.url));return;}
       const entry=files.get(req.url);

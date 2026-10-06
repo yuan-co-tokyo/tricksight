@@ -13,6 +13,7 @@ try {
       page.on('pageerror',()=>errors.push('error'));
       page.on('request',r=>{if(r.method()!=='GET'||!(r.url().startsWith(origin+'/')||r.url().startsWith('blob:'+origin+'/')))unexpected.push('unexpected');});
       await page.goto(origin+'/app-harness');
+      await page.evaluate(()=>{const current=document.createElement('p');current.dataset.diagnostic='current';document.body.append(current);});
       // Use the established harness DOM; remove all signed URL input and replace old listeners.
       await page.evaluate(async()=>{
         document.querySelector('#url').remove();
@@ -26,10 +27,12 @@ try {
       for(let round=0;round<3;round++) {
         await page.locator('#fetch').click();await page.waitForFunction(()=>!document.querySelector('[data-diagnostic=start]').disabled);
         await page.locator('#start').click();await page.waitForFunction(()=>JSON.parse(document.querySelector('#report').textContent).state==='FINISHED',{},{timeout:120000});
-        await page.waitForFunction(()=>JSON.parse(document.querySelector('#report').textContent).displayPainted);
+        await page.locator('#video').evaluate(v=>{v.pause();v.currentTime=3;});
+        await page.waitForFunction(()=>JSON.parse(document.querySelector('#report').textContent).displayPainted && JSON.parse(document.querySelector('#report').textContent).current?.sampleTimestampMs===3000);
         const r=JSON.parse(await page.locator('#report').textContent());
-        assert.equal(r.analysisStatus,'COMPLETED');assert.equal(r.synchronousPlayCalls,1);assert.equal(r.peakVideoElements,2);assert.equal(r.pixelNonUniform,true);assert.equal(r.visiblePlay,true);
+        assert.equal(r.analysisStatus,'READY');assert.equal(r.synchronousPlayCalls,1);assert.equal(r.peakVideoElements,2);assert.equal(r.pixelNonUniform,true);assert.equal(r.visiblePlay,true);assert.equal(r.quality.status,'ASSESSABLE');assert.equal(r.current.sampleTimestampMs,3000);assert(r.current.values.meanKneeAngleDeg!==null);
         assert(!JSON.stringify(r).includes(origin));
+        if (process.env.POSE_DISPLAY_SCREENSHOT && round===0) await page.screenshot({path:`/tmp/pose-display-${name}.png`});
         await page.locator('#stop').click();assert.equal(await page.locator('video').count(),1);
         console.log(JSON.stringify({browser:name,round:round+1,analysisMs:r.analysisMs,frameCount:r.frameCount,displayPainted:r.displayPainted}));
       }

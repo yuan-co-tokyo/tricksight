@@ -16,6 +16,7 @@ const MODEL_PATH = resolve(
 );
 const POSE_MODULE_DIRECTORY = resolve("lib/pose");
 const POSE_MODULES = new Set([
+  "frame-metrics",
   "browser-analysis",
   "config",
   "measurement",

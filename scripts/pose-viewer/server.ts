@@ -98,12 +98,11 @@ async function main() {
     access(resolve(TASKS_VISION_ROOT, "vision_bundle.mjs")),
   ]);
   const modules = new Map<string, string>();
-  for (const name of ["config", "metrics", "measurement", "browser-analysis"]) {
+  for (const name of ["frame-metrics", "config", "metrics", "measurement", "browser-analysis"]) {
     let source = await readFile(resolve("lib/pose", `${name}.ts`), "utf8");
     // Expose existing pure helpers ONLY in this diagnostic server's in-memory
-    // module. The product files, exports and Worker boundary stay unchanged.
+    // module. Shared frame helpers are public; the Worker boundary stays unchanged.
     if (name === "metrics") source += "\nexport { deriveFrame, hasVisibleIndices, LOWER_BODY_INDICES, quantile };";
-    if (name === "browser-analysis") source += "\nexport { createBrowserFrameSource };";
     modules.set(`/pose/${name}`, ts.transpileModule(source, {
       compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 },
     }).outputText);

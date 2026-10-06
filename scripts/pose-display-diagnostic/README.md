@@ -1,16 +1,18 @@
 # T12-2a 動画取得・表示canvas診断
 
-**案Xを実装済み（leader検収・実機確認待ち）。** 実機の設定・操作は [案X手順書](../../docs/t12-2a-production-diagnostic.md) を使う。Vercel Productionの既定OFFフラグと本人allowlistで限定し、履歴から診断を開く。Quick Tunnel、署名URLコピー、一時CORS追加/削除は使わない。CORS適用は依頼者が行い、連絡後にcoderが読み取り確認する。
+**案Xは検収・iPhone Chrome/Safari第1段階を通過。T12-2bは骨格表示Workerを実装済み、検収待ち。** 実機の設定・操作は [案X手順書](../../docs/t12-2a-production-diagnostic.md) を使う。Vercel Productionの既定OFFフラグと本人allowlistで限定し、履歴から診断を開く。Quick Tunnel、署名URLコピー、一時CORS追加/削除は使わない。CORSは依頼者が適用し、leaderのpreflight確認済み。
 
 ## 現時点の成果物
 
-このディレクトリは製品非露出の独立診断で、中間検収済み。通常video＋製品A1の非表示video、表示canvasを別Workerへ移譲した枠/十字、終了/取消/背景破棄を検証する。骨格保持WorkerやJev連携は実装していない。
+このディレクトリは製品非露出の独立診断で、中間検収済み。通常video＋製品A1の非表示video、表示canvasを別Workerへ移譲した枠/十字、終了/取消/背景破棄を検証する。この独立page.mjsはT12-2aの比較基準として残す。実アプリcontrollerは[T12-2bの骨格保持Worker](../../docs/t12-2b-pose-display-worker.md)を使用する。Jev連携は含めない。
 
 ローカル再現:
 
 ```sh
 node scripts/pose-display-diagnostic/test.mjs
 node scripts/pose-display-diagnostic/test-app-controller.mjs
+# 既存ローカルeval生データに対して、変更前51runの全集計と一致を確認
+node --import tsx scripts/pose-display-diagnostic/check-metrics.ts
 # pnpm build後、フラグ未設定の本番HTTP遮断を確認
 node scripts/pose-display-diagnostic/test-production-off.mjs
 pnpm exec eslint scripts/pose-display-diagnostic/*.mjs
@@ -33,4 +35,4 @@ pnpm diagnose:pose-display
 - 大きい素材があれば20秒/100MiB近くでも確認。DOM数・解放呼出しだけで実RSSの解放を保証しない。発熱・強制再読込・クラッシュも記録する。
 - 安全な診断JSONと機種/iOS/ブラウザ・体感結果だけ共有。署名URL・動画・座標・HAR・URL入りスクリーンショットは共有しない。
 - 全画面/PiPは元動画のみ。取消/hidden/pagehideでWorker・Blob URL・video srcを破棄し、自動再開しない。
-- 実機合格と製品公開判断は別。案Xのゲート・所有権テストは実施済み。限定デプロイと依頼者のCORS適用を確認してから進める。
+- 実機合格と製品公開判断は別。案Xのゲート・所有権テストは実施済み。T12-2aは限定デプロイ/CORS適用済み。T12-2bの実機確認は検収後のデプロイで行う。

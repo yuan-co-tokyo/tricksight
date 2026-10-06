@@ -15,6 +15,18 @@
         "ETag"
       ],
       "MaxAgeSeconds": 3000
+    },
+    {
+      "AllowedHeaders": [
+        "Range"
+      ],
+      "AllowedMethods": [
+        "GET"
+      ],
+      "AllowedOrigins": [
+        "https://tricksight-theta.vercel.app"
+      ],
+      "MaxAgeSeconds": 3000
     }
   ]
 }

@@ -1,6 +1,10 @@
 # T12-2a 案X: 本番と同じoriginでの限定診断
 
-2026-10-06。実装とローカル検証済み、leader検収・限定デプロイ・実S3/iPhone実機確認待ち。**CORSは依頼者がコンソールから適用する。適用済み連絡はまだ受けていないため、未適用として扱う。coderはAWSを変更していない。**
+2026-10-06更新。案Xは検収合格・限定デプロイ済み。依頼者によるCORS適用と、leaderによる本番origin GET（Range有無）/POST 200、localhost GET 403/POST 200、無関係origin GET 403の確認済み。[現値JSON](t12-2a-cors-current.json) は適用済み候補を記録したもの（coderによる再GET応答ではない）。coderはAWSを変更していない。
+
+iPhone実機の第1段階はChrome/Safari両方で通過。同一9,044,439 bytesのMP4、89/89 frames COMPLETED。Chromeは取得649ms/計測6438ms、Safariは取得601ms/計測6124ms。両方で同期play1、video2、pixel readable/nonuniform、移譲/描画、通常play成功。元MOV・反復・背景・全画面/回転・大容量・枠/十字の目視は未確認。
+
+以下の枠/十字とCOMPLETEDはT12-2a検収時点の仕様・結果。T12-2bでは骨格と現在値へ置換し、準備完了はREADYとなる。最新の実機操作・境界は [T12-2b手順](t12-2b-pose-display-worker.md) を参照。
 
 ## 依頼者が行う設定（Vercel Production）
 
@@ -15,7 +19,7 @@
    変更は既存デプロイへ反映されないので、Productionを**再デプロイ**する。NEXT_PUBLICの変数は作らない。
 3. 自分のアカウントで本番にログインし、同じブラウザで `https://tricksight-theta.vercel.app/diagnostics/identity` を開く。ログイン中の**自分のIDだけ**が表示される。未認証は404、他人を指定する入力欄/APIはない。このページはallowlist設定用なので、フラグONならallowlistが空でも本人IDだけ確認できる。動画・モデルへはアクセスしない。
 4. 表示されたIDを `POSE_DISPLAY_DIAGNOSTIC_USER_IDS` のProduction値へ貼る。1人ならID1個だけ。複数ならカンマ区切り、前後の空白は除去される。部分一致ではなく完全一致。**IDをagmsg・文書・コミットへ貼らない。** 設定後にProductionを再デプロイし、IDページを閉じ、クリップボードを無害な文字で上書きする。
-5. 承認済み [CORS候補](t12-2a-cors-proposed.json) を依頼者が適用したらleaderへ連絡する。直前の現値と競合がないことを確認し、既存POSTルールを保つ。coderは適用済み連絡の後にget-bucket-corsだけで一致を確認する。診断ルートは本番originを使うのでトンネルoriginやlocalhostの追加は不要。
+5. 承認済み [CORS候補](t12-2a-cors-proposed.json) を依頼者が適用したらleaderへ連絡する。直前の現値と競合がないことを確認し、既存POSTルールを保つ。適用済みで、leaderのpreflight確認により再GETは不要とされた。診断ルートは本番originを使うのでトンネルoriginやlocalhostの追加は不要。
 6. 自分の動画の履歴詳細を再読み込みし「表示診断」を開く。表示されない場合はフラグ、Production対象、再デプロイ、ログイン中IDとallowlistの一致を確認する。別ユーザーや別所有者動画へ権限を広げて回避しない。
 
 ## 実機テスト: 小さいMP4を先に

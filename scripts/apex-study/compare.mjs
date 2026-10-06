@@ -12,7 +12,8 @@ function compile(source, require = () => { throw Error('Unexpected import'); }) 
   return loaded.exports;
 }
 const config = compile(read('lib/pose/config.ts'));
-const { deriveFrame, detectMovementWindow, quantile, calculatePoseMetrics } = compile(source + '\nexport { deriveFrame, detectMovementWindow, quantile };', name => { assert.equal(name, './config'); return config; });
+const frameMetrics = compile(read('lib/pose/frame-metrics.ts'), name => { assert.equal(name, './config'); return config; });
+const { deriveFrame, detectMovementWindow, quantile, calculatePoseMetrics } = compile(source + '\nexport { deriveFrame, detectMovementWindow, quantile };', name => { if (name === './frame-metrics') return frameMetrics; assert.equal(name, './config'); return config; });
 const median = a => quantile(a, .5);
 const inputPath = 'eval/output/pose-landmarker-2026-09-20T13-01-06.200Z.json';
 const inputText = read(inputPath), labelText = read('scripts/apex-study/visual-labels.json');
