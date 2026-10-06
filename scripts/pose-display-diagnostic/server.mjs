@@ -28,6 +28,13 @@ export function createDiagnosticServer({ fixture = false } = {}) {
     res.setHeader('Content-Security-Policy',`default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; worker-src 'self'; connect-src 'self' ${host?'https://'+host:''}; media-src blob: ${fixture?"'self'":''} ${host?'https://'+host:''}; img-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`);
     if(req.method!=='GET' || req.url?.includes('?')) {res.writeHead(405).end();return;}
     try {
+      if(fixture && req.url==='/app-harness') {res.setHeader('Content-Type','text/html');res.end((await readFile(`${root}/index.html`,'utf8')).replace('<script type="module" src="/page.mjs"></script>',''));return;}
+      if(fixture && req.url==='/app-controller.mjs') {
+        res.setHeader('Content-Type','text/javascript');
+        const source=await readFile('lib/diagnostics/pose-display-controller.mjs','utf8');
+        res.end(source.replace("'../pose/browser-analysis'","'/pose/browser-analysis'").replace('startPoseVideoAnalysis(blob,{onProgress:',"startPoseVideoAnalysis(blob,{assetUrls:{modelUrl:'/mediapipe/model',wasmLoaderMode:'MODULE'},onProgress:"));return;
+      }
+      if(fixture && req.url==='/display.worker.mjs') {res.setHeader('Content-Type','text/javascript');res.end(await readFile('lib/diagnostics/display.worker.mjs'));return;}
       if(req.url==='/config') {res.setHeader('Content-Type','application/json');res.end(JSON.stringify({host,fixture}));return;}
       if(compiled.has(req.url)) {res.setHeader('Content-Type','text/javascript');res.end(compiled.get(req.url));return;}
       const entry=files.get(req.url);

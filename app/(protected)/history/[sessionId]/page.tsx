@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PoseDisplayDiagnosticLink } from "@/lib/diagnostics/pose-display-link";
 import { notFound } from "next/navigation";
 import {
   ArrowLeftIcon,
@@ -609,6 +610,14 @@ export default async function HistoryDetailPage({
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            <PoseDisplayDiagnosticLink
+              env={{
+                POSE_DISPLAY_DIAGNOSTIC_ENABLED: process.env.POSE_DISPLAY_DIAGNOSTIC_ENABLED,
+                POSE_DISPLAY_DIAGNOSTIC_USER_IDS: process.env.POSE_DISPLAY_DIAGNOSTIC_USER_IDS,
+              }}
+              userId={user.id}
+              sessionId={sessionId}
+            />
             <VideoPlayback
               video={session.video}
               playbackUrl={playbackUrl}
