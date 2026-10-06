@@ -1,0 +1,32 @@
+{
+  "CORSRules": [
+    {
+      "AllowedHeaders": [
+        "*"
+      ],
+      "AllowedMethods": [
+        "POST"
+      ],
+      "AllowedOrigins": [
+        "http://localhost:3000",
+        "https://tricksight-theta.vercel.app"
+      ],
+      "ExposeHeaders": [
+        "ETag"
+      ],
+      "MaxAgeSeconds": 3000
+    },
+    {
+      "AllowedHeaders": [
+        "Range"
+      ],
+      "AllowedMethods": [
+        "GET"
+      ],
+      "AllowedOrigins": [
+        "https://tricksight-theta.vercel.app"
+      ],
+      "MaxAgeSeconds": 3000
+    }
+  ]
+}

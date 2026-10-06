@@ -1,5 +1,7 @@
 # T12-2a 技術検証報告
 
+> 更新（2026-10-06）: SSO復旧後の現CORS読取は成功。POSTのみでGETがないことを確認した。下記は中間検収時点の記録であり、認証待ち・Quick Tunnel手順は現状ではない。最新の具体差分と案Xの承認依頼は [実機テスト方法の見直し](t12-2a-device-test-proposal.md) を参照。
+
 承認依頼: **診断ページとローカル検証は完了。実S3 CORS確認・iPhone Safari/Chromeの実機検証は保留**。現在値の読取を可能にするSSO再認証と、診断originのCORS確認を依頼する。T12-2b/製品組込みへ自動で進まない。
 
 2026-10-06。検収済みT12-3 `a825b34` / `d5c9841` はmainへpush済み。今回変更は `scripts/pose-display-diagnostic/`、package.jsonの診断コマンド、この文書のみ。製品app/lib/DB/AWS設定・Jev/APIキーは変更していない。
