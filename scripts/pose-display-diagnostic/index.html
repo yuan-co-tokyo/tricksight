@@ -1,0 +1,12 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>動画表示 技術診断 T12-2a</title>
+<style>body{font-family:system-ui;max-width:760px;margin:20px auto;padding:0 12px}button,input{font:inherit;min-height:44px;margin:5px 0;max-width:100%;box-sizing:border-box}input{width:100%}.stage{position:relative;width:100%;height:360px;background:#111}.stage video{width:100%;height:100%;object-fit:contain}.stage canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}pre{white-space:pre-wrap;overflow-wrap:anywhere}button{padding:8px}label{display:block}</style>
+<h1>T12-2a 動画取得・表示診断</h1>
+<p>自分が所有する動画の署名URLを貼り付けてください。URLはサーバーに送らず、この画面のメモリ内だけで扱います。入力欄は取得時に消去します。画面や診断結果を共有する前に、URLが残っていないことを確認してください。</p>
+<label>所有者確認済み署名URL<input id="url" type="password" autocomplete="off" spellcheck="false"></label>
+<button id="fetch">1. 動画を取得</button> <button id="start" disabled>2. 計測と表示テストを開始</button> <button id="stop">終了・破棄</button>
+<p id="status" role="status">未取得</p>
+<div class="stage"><video id="video" controls playsinline muted preload="metadata"></video><canvas id="overlay"></canvas></div>
+<p>枠と十字は描画の動作確認用です。骨格や測定結果ではありません。全画面・PiPでは元動画のみです。</p>
+<p>取得後も別操作で開始します。通常動画を再生しながら計測し、終了後も通常再生を確認してください。背景移動では取得・計測・描画を破棄します。復帰後は手動で再取得してください。</p>
+<pre id="report">{}</pre><button id="copy">安全な診断JSONをコピー</button>
+<script type="module" src="/page.mjs"></script></html>

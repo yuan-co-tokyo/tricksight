@@ -29,7 +29,8 @@
     "eval:twelvelabs": "node --env-file=.env.local --import tsx scripts/eval-twelvelabs.ts",
     "verify:twelvelabs": "node --env-file=.env.local --import tsx scripts/verify-twelvelabs.ts",
     "verify:aws": "node --env-file=.env.local --import tsx scripts/verify-aws.ts",
-    "view:pose": "node --import tsx scripts/pose-viewer/server.ts"
+    "view:pose": "node --import tsx scripts/pose-viewer/server.ts",
+    "diagnose:pose-display": "node --env-file=.env.local scripts/pose-display-diagnostic/server.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock": "^3.1107.0",
