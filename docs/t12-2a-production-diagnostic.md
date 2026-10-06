@@ -2,7 +2,7 @@
 
 2026-10-06更新。案Xは検収合格・限定デプロイ済み。依頼者によるCORS適用と、leaderによる本番origin GET（Range有無）/POST 200、localhost GET 403/POST 200、無関係origin GET 403の確認済み。[現値JSON](t12-2a-cors-current.json) は適用済み候補を記録したもの（coderによる再GET応答ではない）。coderはAWSを変更していない。
 
-iPhone実機の第1段階はChrome/Safari両方で通過。同一9,044,439 bytesのMP4、89/89 frames COMPLETED。Chromeは取得649ms/計測6438ms、Safariは取得601ms/計測6124ms。両方で同期play1、video2、pixel readable/nonuniform、移譲/描画、通常play成功。元MOV・反復・背景・全画面/回転・大容量・枠/十字の目視は未確認。
+iPhone実機の第1段階はChrome/Safari両方で通過。同一9,044,439 bytesのMP4、89/89 frames COMPLETED。Chromeは取得649ms/計測6438ms、Safariは取得601ms/計測6124ms。両方で同期play1、video2、pixel readable/nonuniform、移譲/描画、通常play成功。続報で、計測中に別の画面へ移って戻った際の破棄・旧枠なし・自動再開なし、反復、全画面・回転は依頼者の目視で問題なし。元MOVと20秒近い動画は未検証・保留（素材待ち、依頼者判断 2026-10-06）。大容量上限の確認も未完了。
 
 以下の枠/十字とCOMPLETEDはT12-2a検収時点の仕様・結果。T12-2bでは骨格と現在値へ置換し、準備完了はREADYとなる。最新の実機操作・境界は [T12-2b手順](t12-2b-pose-display-worker.md) を参照。
 
@@ -36,7 +36,7 @@ Safari、Chromeでそれぞれ行う。署名URLのコピー、開発者ツー�
 
 - 元MOVでも同じ操作。MIMEだけ変えたMP4を元MOVの代わりにしない。元MOVがなければ未検証と記録する。
 - 同じ動画で終了→再取得を含め3回反復。最後に計測中の「終了・破棄」も試す。`DISPOSED`、video残数1、旧枠なしを確認する。
-- 計測中にホームへ5秒移り復帰。`BACKGROUND_DISPOSED`、旧枠なし、自動再開なし。手動で再取得できることを確認する。
+- 計測中にiPhoneの画面下から上へスワイプしてホーム画面へ戻り、5秒待ってSafari（Chromeで試す場合はChrome）のアイコンを押す。骨格表示を終了した案内が出て古い枠が残らず、勝手に計測を再開しないことを確認する。再度取得できれば正常。
 - seek、縦横回転、全画面/PiPと復帰。全画面/PiPは元動画のみ。
 - 20秒/100MiBに近い所有素材があれば同様に確認。なければ大容量は未検証。発熱、UI停止、OSによるタブ再読み込み/クラッシュを記録する。
 

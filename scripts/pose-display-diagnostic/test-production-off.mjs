@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { chromium } from '@playwright/test';
 const env={...process.env};delete env.POSE_DISPLAY_DIAGNOSTIC_ENABLED;delete env.POSE_DISPLAY_DIAGNOSTIC_USER_IDS;
+delete env.POSE_VIEWER_ENABLED;delete env.POSE_VIEWER_AUDIENCE;delete env.POSE_VIEWER_USER_IDS;
 const port=4187,origin=`http://127.0.0.1:${port}`;
 const server=spawn(process.execPath,['node_modules/next/dist/bin/next','start','-H','127.0.0.1','-p',String(port)],{env,stdio:'ignore'});
 let browser;

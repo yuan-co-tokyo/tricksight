@@ -15,6 +15,7 @@ export function startPoseDisplay(blob: Blob, canvas: HTMLCanvasElement, options:
   onSample?(sample:DisplaySample):void;
   onError?():void;
   timeoutMs?:number;
+  minimumDurationMs?:number;
 } = {}): DisplayTask {
   const controller=new AbortController();
   let worker:Worker|null=null,source:FrameSource|null=null,ready=false,disposed=false,id=0,generation=0;
@@ -46,7 +47,7 @@ export function startPoseDisplay(blob: Blob, canvas: HTMLCanvasElement, options:
       // Synchronous A1 play before the first await, exactly as in upload analysis.
       source=await createBrowserFrameSource(blob,controller.signal);
       if(disposed)throw new Error();
-      if(source.durationMs>20000||source.durationMs<=0)throw new Error();
+      if(source.durationMs>20000||source.durationMs<=0||source.durationMs<(options.minimumDurationMs??0))throw new Error();
       worker=new Worker(new URL("./pose-display.worker.ts",import.meta.url),{type:"module",name:"tricksight-pose-display"});
       worker.addEventListener("message",event=>{
         const parsed=displayResponseSchema.safeParse(event.data);

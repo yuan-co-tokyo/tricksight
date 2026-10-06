@@ -1,6 +1,6 @@
 # T12-2a 技術検証報告
 
-> 最新: CORS適用・案X検収とiPhone Chrome/Safari第1段階は通過済み。[最新状況](t12-2a-production-diagnostic.md)を参照。以下は中間検収時点の履歴。
+> 最新: CORS適用・案X検収とiPhone Chrome/Safari第1段階は通過済み。反復・全画面/回転・計測中に別画面へ移って戻る操作も依頼者目視で問題なし。元MOVと20秒近い動画は未検証・保留（素材待ち、依頼者判断 2026-10-06）。[最新状況](t12-2a-production-diagnostic.md)を参照。以下は中間検収時点の履歴。
 
 > 更新（2026-10-06、中間検収時）: SSO復旧後の現CORS読取は成功。POSTのみでGETがないことを確認した。下記は中間検収時点の記録であり、認証待ち・Quick Tunnel手順は現状ではない。最新の具体差分と案Xの承認依頼は [実機テスト方法の見直し](t12-2a-device-test-proposal.md) を参照。
 

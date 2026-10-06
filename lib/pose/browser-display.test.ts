@@ -52,6 +52,10 @@ describe("display client lifetime and stale responses",()=>{
     const {canvas}=setup(),onSample=vi.fn(),onError=vi.fn();const task=startPoseDisplay(new Blob(),canvas,{onSample,onError});await task.result;const worker=FakeWorker.instances[0]!;
     worker.events.get("message")?.({data:{id:99,generation:0,result:{type:"raw",landmarks:[]}}});expect(worker.terminate).toHaveBeenCalled();expect(onSample).not.toHaveBeenCalled();expect(onError).toHaveBeenCalledOnce();
   });
+  it("applies the product minimum length before initializing a model",async()=>{
+    const {canvas,close}=setup();const task=startPoseDisplay(new Blob(),canvas,{minimumDurationMs:3000});
+    expect(await task.result).toEqual({status:"FAILED"});expect(close).toHaveBeenCalled();expect(FakeWorker.instances).toHaveLength(0);
+  });
   it("absolute timeout aborts an outstanding frame-source startup",async()=>{
     vi.useFakeTimers();const {canvas}=setup();sourceMock.create.mockImplementation((_blob,signal:AbortSignal)=>new Promise((_r,reject)=>signal.addEventListener("abort",()=>reject(new Error("aborted")))));
     const task=startPoseDisplay(new Blob(),canvas,{timeoutMs:50});await vi.advanceTimersByTimeAsync(50);expect(await task.result).toEqual({status:"TIMED_OUT"});
